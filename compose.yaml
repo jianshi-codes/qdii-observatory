@@ -1,0 +1,60 @@
+name: qdii-observatory
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${QDII_POSTGRES_DB:-qdii_observatory}
+      POSTGRES_USER: ${QDII_POSTGRES_USER:-qdii}
+      POSTGRES_PASSWORD: ${QDII_POSTGRES_PASSWORD:?copy .env.example to .env and set QDII_POSTGRES_PASSWORD}
+    ports:
+      - "${QDII_BIND_HOST:-127.0.0.1}:${QDII_POSTGRES_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - type: ${QDII_PG_VOLUME_TYPE:-volume}
+        source: ${QDII_PG_DATA_SOURCE:-qdii-postgres}
+        target: /var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      QDII_DATABASE_URL: postgresql+psycopg://${QDII_POSTGRES_USER:-qdii}:${QDII_POSTGRES_PASSWORD}@postgres:5432/${QDII_POSTGRES_DB:-qdii_observatory}
+      QDII_RAW_DATA_DIR: /data/raw
+      QDII_ENABLE_PORTFOLIO: ${QDII_ENABLE_PORTFOLIO:-false}
+      QDII_CORS_ORIGINS: http://${QDII_BIND_HOST:-127.0.0.1}:${QDII_FRONTEND_PORT:-5173}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${QDII_BIND_HOST:-127.0.0.1}:${QDII_BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./.data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_QDII_ENABLE_PORTFOLIO: ${QDII_ENABLE_PORTFOLIO:-false}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${QDII_BIND_HOST:-127.0.0.1}:${QDII_FRONTEND_PORT:-5173}:80"
+
+volumes:
+  qdii-postgres:
