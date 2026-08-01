@@ -123,8 +123,8 @@ def test_nav_provider_parses_fixture_pagination_decimals_and_timestamps(
         "017653",
         1,
         2,
-        start_date=date(2026, 7, 1),
-        end_date=date(2026, 7, 3),
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 3),
     )
     second = provider.fetch_page("017653", 2, 2)
 
@@ -132,12 +132,12 @@ def test_nav_provider_parses_fixture_pagination_decimals_and_timestamps(
     assert first.page_index == 1
     assert first.total_pages == 2
     assert first.total_records == 3
-    assert [row.nav_date for row in first.records] == [date(2026, 7, 3), date(2026, 7, 2)]
+    assert [row.nav_date for row in first.records] == [date(2024, 1, 3), date(2024, 1, 2)]
     assert first.records[0].unit_nav.as_tuple().exponent == -4
     assert first.records[0].unit_nav == Decimal("1.2100")
     assert first.records[0].published_daily_return_pct == Decimal("10.0000")
     assert first.records[0].source_published_at == datetime(
-        2026, 7, 4, 8, tzinfo=timezone(timedelta(hours=8))
+        2024, 1, 4, 8, tzinfo=timezone(timedelta(hours=8))
     )
     assert second.page_index == 2
     assert len(second.records) == 1

@@ -11,6 +11,6 @@
 | `QDII_RAW_DATA_DIR` | `.data/raw` | 原始来源归档 |
 | `QDII_ENABLE_PORTFOLIO` | `false` | Portfolio 总开关 |
 | `QDII_PROVIDERS_CONFIG` | `config/providers.local.yaml` | Provider 配置；不存在时读取 example |
-| `QDII_CORS_ORIGINS` | loopback 前端 | 逗号分隔的精确 origin |
+| `QDII_CORS_ORIGINS` | 空（`qdii init` 示例为 loopback 前端） | 逗号分隔的精确 origin |
 
 PostgreSQL 默认使用 named volume。若要 bind mount：设置 `QDII_PG_VOLUME_TYPE=bind` 与 `QDII_PG_DATA_SOURCE=./.data/postgres`，先确认目录容量和权限。

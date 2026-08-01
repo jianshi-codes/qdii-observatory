@@ -10,10 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 DEFAULT_DATABASE_URL = "sqlite+pysqlite:///./.data/qdii-observatory.db"
-DEFAULT_CORS_ORIGINS = (
-    "http://127.0.0.1:5173",
-    "http://localhost:5173",
-)
+DEFAULT_CORS_ORIGINS: tuple[str, ...] = ()
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -45,5 +42,5 @@ def get_settings() -> Settings:
     return Settings(
         database_url=database_url,
         portfolio_enabled=_boolean_env("QDII_ENABLE_PORTFOLIO"),
-        cors_origins=cors_origins or DEFAULT_CORS_ORIGINS,
+        cors_origins=cors_origins,
     )

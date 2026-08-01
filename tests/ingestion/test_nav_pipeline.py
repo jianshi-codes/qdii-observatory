@@ -68,8 +68,8 @@ def test_nav_sync_paginates_upserts_recalculates_and_is_idempotent(
         db_session,
         provider,
         raw_root,
-        start_date=date(2026, 7, 1),
-        end_date=date(2026, 7, 3),
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 3),
         share_codes={share.share_code},
         page_size=2,
     )
@@ -90,9 +90,9 @@ def test_nav_sync_paginates_upserts_recalculates_and_is_idempotent(
     ) == (1, 3, 0)
     assert http.requested_pages == [1, 2]
     assert [row.nav_date for row in first_rows] == [
-        date(2026, 7, 1),
-        date(2026, 7, 2),
-        date(2026, 7, 3),
+        date(2024, 1, 1),
+        date(2024, 1, 2),
+        date(2024, 1, 3),
     ]
     assert [row.calculated_daily_return_pct for row in first_rows] == [
         None,
@@ -101,8 +101,8 @@ def test_nav_sync_paginates_upserts_recalculates_and_is_idempotent(
     ]
 
     rows_by_date = {row["FSRQ"]: row for row in http.documents[1]["Data"]["LSJZList"]}
-    rows_by_date["2026-07-02"].update({"DWJZ": "1.0500", "LJJZ": "1.0500", "JZZZL": "5.0000"})
-    rows_by_date["2026-07-03"]["JZZZL"] = "15.2381"
+    rows_by_date["2024-01-02"].update({"DWJZ": "1.0500", "LJJZ": "1.0500", "JZZZL": "5.0000"})
+    rows_by_date["2024-01-03"]["JZZZL"] = "15.2381"
     http.requested_pages.clear()
 
     revised_run = sync_nav(
@@ -188,8 +188,8 @@ def test_market_sync_records_an_explicit_failure_when_provider_has_no_rows(
         db_session,
         EmptyMarketProvider(),  # type: ignore[arg-type]
         tmp_path / "raw",
-        start_date=date(2026, 7, 1),
-        end_date=date(2026, 7, 31),
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 31),
     )
 
     issue = db_session.scalar(
