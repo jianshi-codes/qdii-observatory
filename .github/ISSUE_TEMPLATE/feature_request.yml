@@ -1,0 +1,19 @@
+name: Feature request
+description: Propose a scoped research or data-quality improvement.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: "What research or operational problem needs solving?"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Include privacy and data-license implications.
+    validations:
+      required: true

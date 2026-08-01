@@ -1,0 +1,26 @@
+name: Provider breakage
+description: Report schema drift, rate limiting, or availability changes.
+title: "[Provider]: "
+labels: [provider]
+body:
+  - type: input
+    id: provider
+    attributes: {label: Provider name}
+    validations: {required: true}
+  - type: dropdown
+    id: status
+    attributes:
+      label: Observed status
+      options: [DEGRADED, RATE_LIMITED, SCHEMA_CHANGED, UNKNOWN]
+    validations: {required: true}
+  - type: textarea
+    id: evidence
+    attributes: {label: Sanitized evidence, description: Error type, HTTP status, and minimal redacted schema evidence.}
+    validations: {required: true}
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: I did not include cookies, tokens, personal data, or a complete third-party response.
+          required: true
