@@ -116,7 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     daily = subparsers.add_parser(
         "sync-daily",
-        help="Refresh NAV, prices, limits, portfolio fees, and USD/CNY reference rates.",
+        help="Refresh NAV, prices, limits, USD/CNY rates, and enabled optional enrichments.",
     )
     daily.add_argument("--lookback-days", type=_positive_int, default=10)
     daily.set_defaults(handler=_sync_daily)

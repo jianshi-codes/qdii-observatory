@@ -9,9 +9,9 @@
 - [x] Apache-2.0、NOTICE、免责声明、隐私、数据许可和安全政策已提供。
 - [x] README、架构、配置、数据模型、解析、穿透、分析与运维文档已提供。
 - [x] CI 仅依赖 fixture，不访问真实 Provider。
-- [ ] 在干净机器完成 `docker compose build` 和空 PostgreSQL migration。
+- [x] 已用干净 Docker 构建上下文完成 backend/frontend build，并在空 PostgreSQL 完成 migration。
 - [ ] 完成依赖许可证清单与第三方数据再分发人工复核。
-- [ ] 完成 secret scan 人工复核。
+- [x] 完成本地 tracked-file secret/path scan；创建远端前仍应运行托管平台的 secret protection。
 - [ ] 确认仓库名称、维护者私密安全联系方式和 GitHub 安全功能。
 - [ ] 明确授权后才创建远端或改变 GitHub 可见性。
 
