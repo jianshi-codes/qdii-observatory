@@ -1,0 +1,204 @@
+import type {
+  ComparePayload,
+  DataQualityIssue,
+  ExposureItem,
+  FundDetail,
+  FundHolding,
+  FundRelation,
+  FundReport,
+  FundShare,
+  FundSummary,
+  IngestionRun,
+  NavPoint,
+  PortfolioPayload,
+  PurchaseLimit,
+  PurchaseLimitChannelType,
+  PurchaseLimitCoverage,
+  ProviderHealth,
+  SecurityHolding,
+} from './types'
+
+const configuredBase = import.meta.env.VITE_API_BASE_URL?.trim()
+const API_BASE = configuredBase ? configuredBase.replace(/\/$/, '') : ''
+
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
+  let response: Response
+
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      headers: { Accept: 'application/json' },
+      signal,
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new ApiError('无法连接本地 API，请确认后端服务已启动。', 0)
+  }
+
+  if (!response.ok) {
+    let detail = `请求失败（HTTP ${response.status}）`
+    try {
+      const payload = (await response.json()) as { detail?: unknown; message?: unknown }
+      const serverMessage = payload.detail ?? payload.message
+      if (typeof serverMessage === 'string' && serverMessage.trim()) detail = serverMessage
+    } catch {
+      // Keep the status-based message when the response is not JSON.
+    }
+    throw new ApiError(detail, response.status)
+  }
+
+  return (await response.json()) as T
+}
+
+function collection<T>(payload: unknown, keys: string[]): T[] {
+  if (Array.isArray(payload)) return payload as T[]
+  if (!payload || typeof payload !== 'object') return []
+
+  const record = payload as Record<string, unknown>
+  for (const key of [...keys, 'items', 'results', 'data']) {
+    if (Array.isArray(record[key])) return record[key] as T[]
+  }
+  return []
+}
+
+function navCollection(payload: unknown): NavPoint[] {
+  const navItems = collection<NavPoint>(payload, ['nav', 'points'])
+  if (!payload || typeof payload !== 'object') return navItems
+  const prices = collection<Record<string, unknown>>(
+    (payload as Record<string, unknown>).exchange_prices,
+    ['exchange_prices', 'prices'],
+  )
+  if (prices.length === 0) return navItems
+
+  const unmatchedPrices = new Set(prices)
+  const merged: NavPoint[] = navItems.map((point): NavPoint => {
+    const match = prices.find((price) => {
+      const sameDate = String(price.trade_date ?? price.nav_date ?? '') === point.nav_date
+      const priceShare = price.share_code
+      return sameDate && (!priceShare || !point.share_code || priceShare === point.share_code)
+    })
+    if (!match) return point
+    unmatchedPrices.delete(match)
+    return {
+      ...point,
+      market_close: (match.close ?? match.market_close) as NavPoint['market_close'],
+      premium_discount_pct: match.premium_discount_pct as NavPoint['premium_discount_pct'],
+    }
+  })
+
+  for (const price of unmatchedPrices) {
+    const date = price.trade_date ?? price.nav_date
+    if (typeof date === 'string') {
+      merged.push({
+        nav_date: date,
+        share_code: typeof price.share_code === 'string' ? price.share_code : null,
+        market_close: (price.close ?? price.market_close) as number | string | null,
+        premium_discount_pct: price.premium_discount_pct as number | string | null,
+      })
+    }
+  }
+  return merged
+}
+
+async function requestCollection<T>(
+  path: string,
+  keys: string[],
+  signal?: AbortSignal,
+): Promise<T[]> {
+  return collection<T>(await request<unknown>(path, signal), keys)
+}
+
+async function requestExposure(
+  path: string,
+  basis: 'direct' | 'lookthrough',
+  signal?: AbortSignal,
+): Promise<ExposureItem[]> {
+  const payload = await request<unknown>(`${path}?basis=${basis}`, signal)
+  const items = collection<ExposureItem>(payload, ['exposures'])
+  const responseBasis = payload && typeof payload === 'object'
+    ? (payload as Record<string, unknown>).basis
+    : basis
+  return items.map((item) => ({ ...item, exposure_scope: String(responseBasis ?? basis) }))
+}
+
+export const api = {
+  portfolio: (signal?: AbortSignal) => request<PortfolioPayload>('/api/portfolio', signal),
+  funds: (signal?: AbortSignal) =>
+    requestCollection<FundSummary>('/api/funds', ['funds'], signal),
+  fund: (id: string, signal?: AbortSignal) =>
+    request<FundDetail>(`/api/funds/${encodeURIComponent(id)}`, signal),
+  shares: (id: string, signal?: AbortSignal) =>
+    requestCollection<FundShare>(`/api/funds/${encodeURIComponent(id)}/shares`, ['shares'], signal),
+  reports: (id: string, signal?: AbortSignal) =>
+    requestCollection<FundReport>(`/api/funds/${encodeURIComponent(id)}/reports`, ['reports'], signal),
+  countryExposure: (id: string, basis: 'direct' | 'lookthrough', signal?: AbortSignal) =>
+    requestExposure(`/api/funds/${encodeURIComponent(id)}/country-exposure`, basis, signal),
+  industryExposure: (id: string, basis: 'direct' | 'lookthrough', signal?: AbortSignal) =>
+    requestExposure(`/api/funds/${encodeURIComponent(id)}/industry-exposure`, basis, signal),
+  holdings: (id: string, signal?: AbortSignal) =>
+    requestCollection<SecurityHolding>(
+      `/api/funds/${encodeURIComponent(id)}/holdings`,
+      ['holdings', 'security_holdings'],
+      signal,
+    ),
+  fundHoldings: (id: string, signal?: AbortSignal) =>
+    requestCollection<FundHolding>(
+      `/api/funds/${encodeURIComponent(id)}/fund-holdings`,
+      ['holdings', 'fund_holdings'],
+      signal,
+    ),
+  nav: (id: string, signal?: AbortSignal) =>
+    request<unknown>(`/api/funds/${encodeURIComponent(id)}/nav`, signal).then(navCollection),
+  purchaseLimits: (
+    id: string,
+    filters: {
+      shareCode?: string
+      snapshotDate?: string
+      channelType?: PurchaseLimitChannelType
+    } = {},
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams()
+    if (filters.shareCode) query.set('share_code', filters.shareCode)
+    if (filters.snapshotDate) query.set('snapshot_date', filters.snapshotDate)
+    if (filters.channelType) query.set('channel_type', filters.channelType)
+    const suffix = query.size ? `?${query.toString()}` : ''
+    return requestCollection<PurchaseLimit>(
+      `/api/funds/${encodeURIComponent(id)}/purchase-limits${suffix}`,
+      ['purchase_limits', 'limits'],
+      signal,
+    )
+  },
+  relations: (id: string, signal?: AbortSignal) =>
+    requestCollection<FundRelation>(
+      `/api/funds/${encodeURIComponent(id)}/relations`,
+      ['relations'],
+      signal,
+    ),
+  compare: (ids: string[], signal?: AbortSignal) => {
+    const query = new URLSearchParams()
+    ids.forEach((id) => query.append('fund_ids', id))
+    return request<ComparePayload>(`/api/compare?${query.toString()}`, signal)
+  },
+  ingestionRuns: (signal?: AbortSignal) =>
+    requestCollection<IngestionRun>('/api/ingestion-runs', ['runs', 'ingestion_runs'], signal),
+  dataQualityIssues: (signal?: AbortSignal) =>
+    requestCollection<DataQualityIssue>(
+      '/api/data-quality-issues',
+      ['issues', 'data_quality_issues'],
+      signal,
+    ),
+  purchaseLimitCoverage: (signal?: AbortSignal) =>
+    request<PurchaseLimitCoverage>('/api/purchase-limit-coverage', signal),
+  providerHealth: (signal?: AbortSignal) =>
+    requestCollection<ProviderHealth>('/api/provider-health', ['providers'], signal),
+}

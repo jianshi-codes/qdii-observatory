@@ -1,0 +1,7 @@
+# Optional user-maintained aliases for disclosed securities. No personal defaults are shipped.
+securities:
+  EXAMPLE-US:
+    canonical_name: Example Technology Corp
+    market: US
+    currency: USD
+    proxy_symbol: null

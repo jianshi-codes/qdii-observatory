@@ -1,0 +1,18 @@
+{
+  "ErrCode": 0,
+  "ErrMsg": null,
+  "TotalCount": 3,
+  "PageSize": 2,
+  "PageIndex": 2,
+  "Data": {
+    "LSJZList": [
+      {
+        "FSRQ": "2026-07-01",
+        "DWJZ": "1.0000",
+        "LJJZ": "1.0000",
+        "JZZZL": null,
+        "SDATE": "2026-07-02T08:00:00+08:00"
+      }
+    ]
+  }
+}

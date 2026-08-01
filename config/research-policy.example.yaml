@@ -1,0 +1,5 @@
+name: example-growth-policy
+objective: 用户自定义研究目标
+preferred_regions: {}
+preferred_industries: {}
+max_overlap_pct: null

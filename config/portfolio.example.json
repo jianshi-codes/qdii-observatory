@@ -1,0 +1,29 @@
+{
+  "notice": "Synthetic local-only example. QDII Observatory never uploads this file.",
+  "positions": [
+    {
+      "share_code": "123456",
+      "platform": "示例平台",
+      "snapshot_date": "2025-01-31",
+      "currency": "CNY",
+      "market_value": "1234.56",
+      "holding_return_pct": "1.25",
+      "holding_profit": "15.43",
+      "cumulative_profit": "15.43",
+      "purchase_fee_pct": "0.15",
+      "recurring_plan": {
+        "frequency": "DAILY",
+        "gross_amount": "100.00",
+        "fee_pct": "0.15",
+        "net_amount": "99.85"
+      },
+      "cash_flows": [
+        {
+          "occurred_year": 2025,
+          "amount": "12.34",
+          "note": "synthetic example"
+        }
+      ]
+    }
+  ]
+}

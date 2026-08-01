@@ -1,0 +1,4 @@
+representative_code,representative_name,manager_name,canonical_name,share_codes,share_names,share_currencies,region,category,strategy_type,wrapper_type,tech_scope,enabled
+123456,Synthetic Global Equity A,Example Asset Management,Synthetic Global Equity,"123456,123457","A类,C类",CNY,全球,主动权益,主动管理,DIRECT,GLOBAL_ACTIVE_EQUITY,true
+234567,Synthetic Overseas Index ETF,Sample Fund Co,Synthetic Overseas Index ETF,234567,ETF,CNY,美国,宽基指数,指数型,ETF,UNKNOWN,true
+345678,Synthetic QDII Feeder,Demo Investments,Synthetic QDII Feeder,"345678,345679","A类,C类","CNY,USD",全球,ETF联接,指数联接,ETF_FEEDER,UNKNOWN,true

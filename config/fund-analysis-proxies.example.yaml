@@ -1,0 +1,6 @@
+# Copy to fund-analysis-proxies.local.yaml. The local file is ignored by Git.
+funds:
+  "123456":
+    benchmark_name: synthetic disclosed holdings proxy
+    # CSV columns: date,estimated_return_pct. Use public/licensed or user-created data only.
+    estimated_returns_file: .data/private/synthetic-estimated-returns.csv
