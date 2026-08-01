@@ -1,5 +1,6 @@
 FROM node:22-alpine AS build
 
+ENV CI=true
 WORKDIR /app
 RUN corepack enable
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
