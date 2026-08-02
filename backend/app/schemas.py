@@ -178,6 +178,52 @@ class FundListRead(ApiModel):
     limit: int
 
 
+class FundCompanyChoiceRead(ApiModel):
+    company_code: str
+    company_name: str
+
+
+class ResearchScopeChoiceRead(ApiModel):
+    value: str
+    label: str
+
+
+class FundCatalogOptionsRead(ApiModel):
+    companies: list[FundCompanyChoiceRead]
+    research_scopes: list[ResearchScopeChoiceRead]
+    source_provider: str
+    source_notice: str
+
+
+class PublicFundCandidateRead(ApiModel):
+    fund_code: str
+    fund_name: str
+    manager_code: str
+    manager_name: str
+    category: str
+    research_scope: str
+    currency: str
+    wrapper_type: str
+    source_url: str
+
+
+class FundCatalogCandidatesRead(ApiModel):
+    items: list[PublicFundCandidateRead]
+    categories: list[str]
+    total: int
+    source_provider: str
+
+
+class PublicFundImportRequest(ApiModel):
+    fund_codes: list[str] = Field(min_length=1, max_length=100)
+
+
+class PublicFundImportRead(ApiModel):
+    status: Literal["succeeded", "partial", "failed"]
+    imported_codes: list[str]
+    failures: dict[str, str]
+
+
 class ExposureFamilyRead(ApiModel):
     code: str
     display_name: str

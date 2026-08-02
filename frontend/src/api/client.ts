@@ -3,6 +3,8 @@ import type {
   DataQualityIssue,
   ExposureItem,
   FundDetail,
+  FundCatalogCandidates,
+  FundCatalogOptions,
   FundHolding,
   FundRelation,
   FundReport,
@@ -15,6 +17,8 @@ import type {
   PurchaseLimitChannelType,
   PurchaseLimitCoverage,
   ProviderHealth,
+  PublicFundCandidate,
+  PublicFundImportResult,
   SecurityHolding,
 } from './types'
 
@@ -31,12 +35,17 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function request<T>(
+  path: string,
+  signal?: AbortSignal,
+  init: RequestInit = {},
+): Promise<T> {
   let response: Response
 
   try {
     response = await fetch(`${API_BASE}${path}`, {
-      headers: { Accept: 'application/json' },
+      ...init,
+      headers: { Accept: 'application/json', ...init.headers },
       signal,
     })
   } catch (error) {
@@ -201,4 +210,21 @@ export const api = {
     request<PurchaseLimitCoverage>('/api/purchase-limit-coverage', signal),
   providerHealth: (signal?: AbortSignal) =>
     requestCollection<ProviderHealth>('/api/provider-health', ['providers'], signal),
+  fundCatalogOptions: (signal?: AbortSignal) =>
+    request<FundCatalogOptions>('/api/fund-catalog/options', signal),
+  fundCatalogCandidates: (companyCode: string, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ company_code: companyCode })
+    return request<FundCatalogCandidates>(`/api/fund-catalog/candidates?${query}`, signal)
+  },
+  lookupPublicFund: (fundCode: string, signal?: AbortSignal) =>
+    request<PublicFundCandidate>(
+      `/api/fund-catalog/lookup/${encodeURIComponent(fundCode)}`,
+      signal,
+    ),
+  importPublicFunds: (fundCodes: string[], signal?: AbortSignal) =>
+    request<PublicFundImportResult>('/api/fund-catalog/import', signal, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fund_codes: fundCodes }),
+    }),
 }

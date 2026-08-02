@@ -1,0 +1,1 @@
+var FundCommpanyInfos=[{"_id":"80009999","COMPANYCODE":"80009999","SNAME":"示例基金","SEARCHFIELD":"80009999示例基金管理有限公司示例基金SLJJ"},{"_id":"10009999","COMPANYCODE":"10009999","SNAME":"示例证券","SEARCHFIELD":"10009999示例证券股份有限公司示例证券SLZQ"}];

@@ -1,4 +1,11 @@
 providers:
+  eastmoney_catalog:
+    enabled: true
+    priority: 5
+    timeout_seconds: 20
+    retry_attempts: 3
+    rate_limit_per_second: 2
+    user_agent: QDII-Observatory/0.1 (+local-first-research)
   csrc_reports:
     enabled: true
     priority: 10

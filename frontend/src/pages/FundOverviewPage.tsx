@@ -309,7 +309,7 @@ export function FundOverviewPage() {
 
         {fundsQuery.isPending && <LoadingPanel label="正在载入基金 universe…" />}
         {fundsQuery.isError && <ErrorPanel error={fundsQuery.error} onRetry={() => fundsQuery.refetch()} />}
-        {fundsQuery.isSuccess && funds.length === 0 && <EmptyPanel title="基金 universe 尚未导入" detail="请先执行 Excel universe 导入；观察台不会使用演示基金替代真实结果。" />}
+        {fundsQuery.isSuccess && funds.length === 0 && <EmptyPanel title="基金 universe 尚未导入" detail="请到数据运维页从公开信息选择基金或输入六位代码；观察台不会使用演示基金替代真实结果。" />}
         {fundsQuery.isSuccess && funds.length > 0 && filteredFunds.length === 0 && <EmptyPanel title="没有匹配的基金" detail="调整搜索词或筛选条件后再试。" compact />}
         {fundsQuery.isSuccess && filteredFunds.length > 0 && (
           <div className="data-table-wrap">

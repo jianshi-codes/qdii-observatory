@@ -131,6 +131,33 @@ class ExchangeRateObservation:
     confidence: Decimal | None
 
 
+@dataclass(frozen=True, slots=True)
+class FundCompanyChoice:
+    company_code: str
+    company_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class PublicFundCandidate:
+    fund_code: str
+    fund_name: str
+    manager_code: str
+    manager_name: str
+    category: str
+    research_scope: str
+    currency: str
+    wrapper_type: str
+    source_url: str
+
+
+@dataclass(frozen=True, slots=True)
+class FundCatalogSnapshot:
+    candidates: tuple[PublicFundCandidate, ...]
+    raw_payload: bytes
+    source_url: str
+    mime_type: str
+
+
 class ReportProvider(Protocol):
     name: str
     version: str
@@ -182,3 +209,14 @@ class ExchangeRateProvider(Protocol):
     version: str
 
     def fetch(self) -> ExchangeRateObservation: ...
+
+
+class FundCatalogProvider(Protocol):
+    name: str
+    version: str
+
+    def companies(self) -> tuple[FundCompanyChoice, ...]: ...
+
+    def discover_company(self, company_code: str) -> FundCatalogSnapshot: ...
+
+    def lookup(self, fund_code: str) -> FundCatalogSnapshot: ...

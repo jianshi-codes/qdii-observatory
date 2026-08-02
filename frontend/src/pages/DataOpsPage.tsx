@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   AlertCircle,
   Clock3,
@@ -6,16 +6,24 @@ import {
   FileWarning,
   Gauge,
   History,
+  Plus,
   Play,
   RefreshCw,
+  Search,
   ServerCog,
   ShieldAlert,
   WalletCards,
 } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import type { DataQualityIssue, FundSummary, IngestionRun } from '../api/types'
+import type {
+  DataQualityIssue,
+  FundSummary,
+  IngestionRun,
+  PublicFundCandidate,
+} from '../api/types'
 import { EmptyPanel, ErrorPanel, LoadingPanel } from '../components/StatePanel'
 import { StatusBadge } from '../components/StatusBadge'
 import {
@@ -121,6 +129,8 @@ export function DataOpsPage() {
           <RefreshCw size={16} className={anyPending ? 'spin' : ''} />刷新状态
         </button>
       </section>
+
+      <CatalogImportPanel onImported={refreshAll} />
 
       <section className="ops-stat-grid" aria-label="数据运维摘要">
         <article className="ops-stat ops-stat-coverage">
@@ -289,6 +299,201 @@ export function DataOpsPage() {
         <IssuePanel title="限额抓取与渠道覆盖" kicker="SALES LIMIT ISSUES" issues={limitIssues} pending={issuesQuery.isPending} error={issuesQuery.error} onRetry={() => issuesQuery.refetch()} />
       </div>
     </div>
+  )
+}
+
+function CatalogImportPanel({ onImported }: { onImported: () => void }) {
+  const [companyCode, setCompanyCode] = useState('')
+  const [category, setCategory] = useState('ALL')
+  const [researchScope, setResearchScope] = useState('ALL')
+  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set())
+  const [fundCode, setFundCode] = useState('')
+
+  const optionsQuery = useQuery({
+    queryKey: ['fund-catalog-options'],
+    queryFn: ({ signal }) => api.fundCatalogOptions(signal),
+    staleTime: 60 * 60 * 1000,
+  })
+  const candidatesQuery = useQuery({
+    queryKey: ['fund-catalog-candidates', companyCode],
+    queryFn: ({ signal }) => api.fundCatalogCandidates(companyCode, signal),
+    enabled: Boolean(companyCode),
+    staleTime: 15 * 60 * 1000,
+  })
+  const lookupMutation = useMutation({
+    mutationFn: (code: string) => api.lookupPublicFund(code),
+  })
+  const importMutation = useMutation({
+    mutationFn: (codes: string[]) => api.importPublicFunds(codes),
+    onSuccess: () => {
+      setSelectedCodes(new Set())
+      onImported()
+    },
+  })
+
+  const candidates = useMemo(() => {
+    const rows = candidatesQuery.data?.items ?? []
+    return rows.filter((item) => (
+      (category === 'ALL' || item.category === category)
+      && (researchScope === 'ALL' || item.research_scope === researchScope)
+    ))
+  }, [candidatesQuery.data, category, researchScope])
+
+  function changeCompany(value: string) {
+    setCompanyCode(value)
+    setCategory('ALL')
+    setResearchScope('ALL')
+    setSelectedCodes(new Set())
+  }
+
+  function toggleCandidate(code: string) {
+    setSelectedCodes((current) => {
+      const next = new Set(current)
+      if (next.has(code)) next.delete(code)
+      else next.add(code)
+      return next
+    })
+  }
+
+  function lookupCode() {
+    const normalized = fundCode.trim()
+    if (/^[0-9]{6}$/.test(normalized)) lookupMutation.mutate(normalized)
+  }
+
+  return (
+    <section className="catalog-import-grid" aria-labelledby="catalog-import-title">
+      <div className="panel catalog-browser">
+        <div className="panel-heading">
+          <div>
+            <span className="section-kicker">PUBLIC FUND CATALOG</span>
+            <h2 id="catalog-import-title">从公开信息选择基金</h2>
+            <p>先选基金公司，再按来源分类和研究口径筛选；只有勾选的基金代码会写入本地 universe。</p>
+          </div>
+          <Database size={20} />
+        </div>
+        {optionsQuery.isPending && <LoadingPanel label="读取公开基金公司目录…" />}
+        {optionsQuery.isError && <ErrorPanel compact error={optionsQuery.error} onRetry={() => optionsQuery.refetch()} />}
+        {optionsQuery.isSuccess && (
+          <>
+            <div className="catalog-filter-grid">
+              <label>
+                <span>基金公司</span>
+                <select value={companyCode} onChange={(event) => changeCompany(event.target.value)}>
+                  <option value="">请选择基金公司</option>
+                  {optionsQuery.data.companies.map((company) => (
+                    <option key={company.company_code} value={company.company_code}>{company.company_name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>来源分类</span>
+                <select value={category} onChange={(event) => setCategory(event.target.value)} disabled={!candidatesQuery.data}>
+                  <option value="ALL">全部分类</option>
+                  {(candidatesQuery.data?.categories ?? []).map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>研究口径</span>
+                <select value={researchScope} onChange={(event) => setResearchScope(event.target.value)}>
+                  {optionsQuery.data.research_scopes.map((scope) => (
+                    <option key={scope.value} value={scope.value}>{scope.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="panel-note">{optionsQuery.data.source_notice} “研究口径”是本项目的名称规则筛选，不是来源方分类或投资建议。</p>
+          </>
+        )}
+        {candidatesQuery.isPending && <LoadingPanel label="读取该基金公司的 QDII 清单…" />}
+        {candidatesQuery.isError && <ErrorPanel compact error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
+        {candidatesQuery.isSuccess && candidates.length === 0 && <EmptyPanel compact title="当前筛选没有基金" detail="可更换来源分类或研究口径；不会用相似基金自动补位。" />}
+        {candidatesQuery.isSuccess && candidates.length > 0 && (
+          <>
+            <div className="catalog-candidate-list">
+              {candidates.map((candidate) => (
+                <CatalogCandidateRow
+                  key={candidate.fund_code}
+                  candidate={candidate}
+                  selected={selectedCodes.has(candidate.fund_code)}
+                  onToggle={() => toggleCandidate(candidate.fund_code)}
+                />
+              ))}
+            </div>
+            <div className="catalog-actions">
+              <span>已选择 <strong>{selectedCodes.size}</strong> 只</span>
+              <button
+                className="button button-primary"
+                type="button"
+                disabled={selectedCodes.size === 0 || importMutation.isPending}
+                onClick={() => importMutation.mutate([...selectedCodes])}
+              >
+                <Plus size={15} />导入所选基金
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="catalog-side-stack">
+        <div className="panel catalog-code-import">
+          <div className="panel-heading">
+            <div><span className="section-kicker">EXACT CODE</span><h2>按基金代码添加</h2><p>输入六位代码，先读取并核对公开资料，再确认导入。</p></div>
+            <Search size={20} />
+          </div>
+          <label className="catalog-code-field">
+            <span className="sr-only">六位基金代码</span>
+            <input
+              inputMode="numeric"
+              maxLength={6}
+              value={fundCode}
+              onChange={(event) => setFundCode(event.target.value.replace(/\D/g, ''))}
+              placeholder="例如：六位基金代码"
+            />
+            <button className="button button-secondary" type="button" disabled={fundCode.length !== 6 || lookupMutation.isPending} onClick={lookupCode}>查询</button>
+          </label>
+          {lookupMutation.isError && <ErrorPanel compact error={lookupMutation.error} />}
+          {lookupMutation.data && (
+            <div className="catalog-code-preview">
+              <code>{lookupMutation.data.fund_code}</code>
+              <strong>{lookupMutation.data.fund_name}</strong>
+              <span>{lookupMutation.data.manager_name} · {lookupMutation.data.category}</span>
+              <a href={lookupMutation.data.source_url} target="_blank" rel="noreferrer">查看公开来源</a>
+              <button className="button button-primary" type="button" disabled={importMutation.isPending} onClick={() => importMutation.mutate([lookupMutation.data.fund_code])}><Plus size={15} />确认导入</button>
+            </div>
+          )}
+        </div>
+
+        <div className="panel catalog-advanced-import">
+          <span className="section-kicker">ADVANCED IMPORT</span>
+          <h2>批量文件导入</h2>
+          <p>CSV、XLSX、JSON 继续保留给自定义字段、离线目录或大批量迁移，不再是新用户的首要入口。</p>
+          <code>qdii import-universe --file &lt;path&gt;</code>
+        </div>
+
+        {importMutation.isError && <ErrorPanel compact error={importMutation.error} />}
+        {importMutation.data && (
+          <div className={`catalog-import-result tone-${issueTone(importMutation.data.status)}`} role="status">
+            <strong>导入状态：{statusLabel(importMutation.data.status)}</strong>
+            <span>成功 {importMutation.data.imported_codes.length} 只，失败 {Object.keys(importMutation.data.failures).length} 只。</span>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function CatalogCandidateRow({ candidate, selected, onToggle }: {
+  candidate: PublicFundCandidate
+  selected: boolean
+  onToggle: () => void
+}) {
+  return (
+    <label className={selected ? 'catalog-candidate is-selected' : 'catalog-candidate'}>
+      <input type="checkbox" checked={selected} onChange={onToggle} />
+      <code>{candidate.fund_code}</code>
+      <span><strong>{candidate.fund_name}</strong><small>{candidate.category} · {candidate.currency} · {candidate.wrapper_type}</small></span>
+      <em>{candidate.research_scope}</em>
+    </label>
   )
 }
 

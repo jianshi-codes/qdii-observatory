@@ -43,6 +43,48 @@ export interface FundSummary {
   [key: string]: unknown
 }
 
+export interface FundCompanyChoice {
+  company_code: string
+  company_name: string
+}
+
+export interface ResearchScopeChoice {
+  value: string
+  label: string
+}
+
+export interface FundCatalogOptions {
+  companies: FundCompanyChoice[]
+  research_scopes: ResearchScopeChoice[]
+  source_provider: string
+  source_notice: string
+}
+
+export interface PublicFundCandidate {
+  fund_code: string
+  fund_name: string
+  manager_code: string
+  manager_name: string
+  category: string
+  research_scope: string
+  currency: string
+  wrapper_type: string
+  source_url: string
+}
+
+export interface FundCatalogCandidates {
+  items: PublicFundCandidate[]
+  categories: string[]
+  total: number
+  source_provider: string
+}
+
+export interface PublicFundImportResult {
+  status: 'succeeded' | 'partial' | 'failed'
+  imported_codes: string[]
+  failures: Record<string, string>
+}
+
 export interface FundDetail extends FundSummary {
   exposure_family?: string | null
   lookthrough_coverage_pct?: number | string | null

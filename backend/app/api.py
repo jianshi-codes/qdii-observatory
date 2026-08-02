@@ -1,21 +1,30 @@
-"""Read-only local API for fund, report, exposure, and operations data."""
+"""Local API for explicit fund selection, research data, and operations status."""
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Generator
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from itertools import combinations
 from math import sqrt
 from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from backend.app.database import get_db
+from backend.app.ingestion.catalog_pipeline import import_public_funds
+from backend.app.ingestion.http import ProviderHttpClient, ProviderHttpError, RetryPolicy
 from backend.app.ingestion.provider_registry import load_provider_registry, provider_status
+from backend.app.ingestion.providers.base import FundCatalogProvider, ProviderSchemaError
+from backend.app.ingestion.providers.catalog import (
+    RESEARCH_SCOPES,
+    EastmoneyFundCatalogProvider,
+)
+from backend.app.ingestion.storage import raw_data_dir
 from backend.app.models import (
     DailyExchangePrice,
     DailyExchangeRate,
@@ -46,6 +55,9 @@ from backend.app.schemas import (
     ExchangePriceRead,
     ExposureFamilyRead,
     ExposureRead,
+    FundCatalogCandidatesRead,
+    FundCatalogOptionsRead,
+    FundCompanyChoiceRead,
     FundDetailRead,
     FundHoldingRead,
     FundHoldingsRead,
@@ -67,10 +79,14 @@ from backend.app.schemas import (
     PortfolioPositionRead,
     PortfolioRead,
     PortfolioRecurringPlanRead,
+    PublicFundCandidateRead,
+    PublicFundImportRead,
+    PublicFundImportRequest,
     PurchaseLimitCoverageRead,
     PurchaseLimitRead,
     PurchaseLimitsRead,
     PurchaseLimitSummaryRead,
+    ResearchScopeChoiceRead,
     ReturnCorrelationRead,
     SecurityHoldingRead,
 )
@@ -83,6 +99,23 @@ PurchaseLimitChannel = Literal["DIRECT", "DISTRIBUTION"]
 CENT = Decimal("0.01")
 QUANTITY_SCALE = Decimal("0.00000001")
 PERCENT_SCALE = Decimal("0.00000001")
+
+
+def get_fund_catalog_provider() -> Generator[FundCatalogProvider, None, None]:
+    registry = load_provider_registry()
+    config = registry.get("eastmoney_catalog")
+    if config is None or not config.enabled:
+        raise HTTPException(status_code=503, detail="Public fund catalog provider is disabled")
+    with ProviderHttpClient(
+        timeout_seconds=config.timeout_seconds,
+        min_interval_seconds=1 / config.rate_limit_per_second,
+        retry=RetryPolicy(attempts=config.retry_attempts),
+        user_agent=config.user_agent,
+    ) as http:
+        yield EastmoneyFundCatalogProvider(http)
+
+
+CatalogProvider = Annotated[FundCatalogProvider, Depends(get_fund_catalog_provider)]
 
 
 def _normalize_basis(value: str) -> ExposureBasis:
@@ -465,6 +498,89 @@ def list_funds(
     ).all()
     return FundListRead(
         items=_fund_summaries(db, list(funds)), total=total, offset=offset, limit=limit
+    )
+
+
+@router.get("/fund-catalog/options", response_model=FundCatalogOptionsRead)
+def get_fund_catalog_options(provider: CatalogProvider) -> FundCatalogOptionsRead:
+    try:
+        companies = provider.companies()
+    except (ProviderSchemaError, ProviderHttpError, ValueError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return FundCatalogOptionsRead(
+        companies=[
+            FundCompanyChoiceRead(
+                company_code=item.company_code,
+                company_name=item.company_name,
+            )
+            for item in companies
+        ],
+        research_scopes=[
+            ResearchScopeChoiceRead(value=value, label=label)
+            for value, label in RESEARCH_SCOPES
+        ],
+        source_provider=provider.name,
+        source_notice="第三方公开目录可能延迟或变更；导入前请核对基金公司正式信息。",
+    )
+
+
+@router.get("/fund-catalog/candidates", response_model=FundCatalogCandidatesRead)
+def get_fund_catalog_candidates(
+    provider: CatalogProvider,
+    company_code: Annotated[str, Query(pattern=r"^[0-9]{8}$")],
+    category: str | None = None,
+    research_scope: str | None = None,
+) -> FundCatalogCandidatesRead:
+    try:
+        snapshot = provider.discover_company(company_code)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ProviderSchemaError, ProviderHttpError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    categories = sorted({item.category for item in snapshot.candidates})
+    candidates = [
+        item
+        for item in snapshot.candidates
+        if (category is None or item.category == category)
+        and (research_scope in (None, "ALL") or item.research_scope == research_scope)
+    ]
+    return FundCatalogCandidatesRead(
+        items=[PublicFundCandidateRead.model_validate(item) for item in candidates],
+        categories=categories,
+        total=len(candidates),
+        source_provider=provider.name,
+    )
+
+
+@router.get("/fund-catalog/lookup/{fund_code}", response_model=PublicFundCandidateRead)
+def lookup_public_fund(
+    provider: CatalogProvider,
+    fund_code: Annotated[str, Path(pattern=r"^[0-9]{6}$")],
+) -> PublicFundCandidateRead:
+    try:
+        snapshot = provider.lookup(fund_code)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ProviderSchemaError, ProviderHttpError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return PublicFundCandidateRead.model_validate(snapshot.candidates[0])
+
+
+@router.post("/fund-catalog/import", response_model=PublicFundImportRead)
+def import_selected_public_funds(
+    request: PublicFundImportRequest,
+    db: DbSession,
+    provider: CatalogProvider,
+) -> PublicFundImportRead:
+    codes = tuple(dict.fromkeys(code.strip() for code in request.fund_codes))
+    invalid = [code for code in codes if len(code) != 6 or not code.isdigit()]
+    if invalid:
+        raise HTTPException(status_code=422, detail=f"Invalid six-digit fund codes: {invalid}")
+    result = import_public_funds(db, provider, raw_data_dir(), codes)
+    return PublicFundImportRead(
+        status=result.status,
+        imported_codes=list(result.imported_codes),
+        failures=result.failures,
     )
 
 
