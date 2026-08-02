@@ -1,0 +1,7 @@
+services:
+  postgres:
+    profiles: ["bundled-db"]
+
+  backend:
+    environment:
+      QDII_DATABASE_URL: ${QDII_EXTERNAL_DATABASE_URL:?set QDII_EXTERNAL_DATABASE_URL to an existing PostgreSQL database}

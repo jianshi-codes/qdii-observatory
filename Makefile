@@ -5,8 +5,9 @@ PNPM ?= pnpm
 UNIVERSE ?= examples/universe.sample.csv
 FUND_CODE ?=
 COMPOSE ?= docker compose --env-file .env
+COMPOSE_EXTERNAL ?= docker compose --env-file .env -f compose.yaml -f compose.external.yaml
 
-.PHONY: setup init doctor docker-up docker-down docker-restart docker-daily docker-reset migrate dev-backend \
+.PHONY: setup init doctor docker-up docker-up-external docker-down docker-restart docker-daily docker-reset migrate dev-backend \
 	dev-frontend import-universe validate-universe demo sync-reports parse-reports sync-daily \
 	coverage analyze-fund backup restore lint typecheck test build check
 
@@ -22,6 +23,9 @@ doctor:
 
 docker-up:
 	$(COMPOSE) up --build -d
+
+docker-up-external:
+	$(COMPOSE_EXTERNAL) up --build -d
 
 docker-down:
 	$(COMPOSE) down
@@ -95,3 +99,4 @@ build:
 check: lint typecheck test build
 	git diff --check
 	docker compose --env-file .env.example config --quiet
+	QDII_EXTERNAL_DATABASE_URL=postgresql+psycopg://user:password@db.example:5432/qdii_observatory docker compose --env-file .env.example -f compose.yaml -f compose.external.yaml config --quiet

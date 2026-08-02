@@ -30,15 +30,12 @@ services:
       QDII_RAW_DATA_DIR: /data/raw
       QDII_ENABLE_PORTFOLIO: ${QDII_ENABLE_PORTFOLIO:-false}
       QDII_CORS_ORIGINS: http://${QDII_BIND_HOST:-127.0.0.1}:${QDII_FRONTEND_PORT:-5173}
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       - "${QDII_BIND_HOST:-127.0.0.1}:${QDII_BACKEND_PORT:-8000}:8000"
     volumes:
       - ${QDII_DATA_DIR:-./.data}:/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"]
       interval: 10s
       timeout: 3s
       retries: 20

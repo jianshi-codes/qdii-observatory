@@ -35,7 +35,17 @@ cp .env.example .env
 docker compose up --build
 ```
 
-默认仅绑定 `127.0.0.1`。打开 <http://127.0.0.1:5173>；API 文档位于 <http://127.0.0.1:8000/api/docs>。容器启动时会等待 PostgreSQL ready 并从空库执行 Alembic migration。
+默认仅绑定 `127.0.0.1`。打开 <http://127.0.0.1:5173>；API 文档位于 <http://127.0.0.1:8000/api/docs>。容器启动时会等待 PostgreSQL 可连接，执行数据库预检，并从空库运行 Alembic migration。
+
+也可以使用已经创建好 database 的专用外部 PostgreSQL。外部模式不会启动内置 PG，会在 migration 前区分空库、受管库和冲突库，并拒绝认领未知表：
+
+```bash
+# 在 .env 设置 QDII_EXTERNAL_DATABASE_URL 后
+make docker-up-external
+curl --fail http://127.0.0.1:8000/ready
+```
+
+完整前置条件与冲突处理见 [docs/external-postgresql.md](docs/external-postgresql.md)。
 
 ## 从公开信息添加基金
 
@@ -98,11 +108,11 @@ make dev-frontend      # 终端 2
 make check
 ```
 
-常用运维命令包括 `qdii init`、`qdii doctor`、`qdii backup`、`qdii restore --file ... --confirm`，以及 `make docker-up`、`make docker-restart`、`make docker-daily`、`make docker-down`、`make migrate`。`docker compose down` 不删除 volume。电脑开机后的启动、每日维护、停止、重启和代码更新步骤见 [docs/daily-operations.md](docs/daily-operations.md)。
+常用运维命令包括 `qdii init`、`qdii doctor`、`qdii backup`、`qdii restore --file ... --confirm`，以及 `make docker-up`、`make docker-up-external`、`make docker-restart`、`make docker-daily`、`make docker-down`、`make migrate`。`docker compose down` 不删除 volume。电脑开机后的启动、每日维护、停止、重启和代码更新步骤见 [docs/daily-operations.md](docs/daily-operations.md)。
 
 ## 文档入口
 
-- [快速开始](docs/quickstart.md) · [配置](docs/configuration.md) · [架构](docs/architecture.md)
+- [快速开始](docs/quickstart.md) · [配置](docs/configuration.md) · [外部 PostgreSQL](docs/external-postgresql.md) · [架构](docs/architecture.md)
 - [报告解析](docs/report-parsing.md) · [穿透](docs/lookthrough.md) · [披露持仓一致性](docs/disclosed-holdings-analysis.md)
 - [数据来源](docs/data-sources.md) · [每日维护与重启](docs/daily-operations.md) · [运维/备份](docs/operations.md) · [故障排查](docs/troubleshooting.md)
 - [贡献指南](CONTRIBUTING.md) · [安全](SECURITY.md) · [公开发布清单](PUBLIC_RELEASE_CHECKLIST.md)

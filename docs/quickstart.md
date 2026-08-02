@@ -6,9 +6,12 @@ cp .env.example .env
 docker compose up --build
 docker compose ps
 curl http://127.0.0.1:8000/health
+curl --fail http://127.0.0.1:8000/ready
 ```
 
-首次启动会等待 PostgreSQL、执行 Alembic migration，再启动 API。访问 <http://127.0.0.1:5173>。
+首次启动会等待 PostgreSQL 可连接，执行数据库预检和 Alembic migration，通过最新版结构复核后再启动 API。访问 <http://127.0.0.1:5173>。
+
+如果已有专用外部 PostgreSQL database，在 `.env` 设置 `QDII_EXTERNAL_DATABASE_URL` 后改用 `make docker-up-external`。项目不会创建 database，也不会认领没有有效 Alembic 历史的未知表；详见 [external-postgresql.md](external-postgresql.md)。
 
 打开“数据运维”页，选择基金公司、来源分类、研究口径和具体基金，或输入六位基金代码核对后导入。CSV/XLSX/JSON 文件仅作为高级批量入口继续保留：
 

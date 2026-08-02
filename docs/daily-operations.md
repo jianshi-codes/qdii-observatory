@@ -8,9 +8,12 @@
 make docker-up
 docker compose --env-file .env ps
 curl --fail http://127.0.0.1:8000/health
+curl --fail http://127.0.0.1:8000/ready
 ```
 
-`make docker-up` 会执行 `docker compose up --build -d`。backend 等待 PostgreSQL healthy 后自动执行 Alembic migration，再启动 API。Compose 服务配置了 `restart: unless-stopped`；Docker Desktop 随系统启动时，未被手工停止的容器通常会自动恢复，但仍应执行 `ps` 和 health 检查，不要只看容器名称判断可用。
+`make docker-up` 会执行 `docker compose up --build -d`。backend 等待 PostgreSQL 可连接，执行只读数据库预检和 Alembic migration，通过最新版结构复核后再启动 API。Compose 服务配置了 `restart: unless-stopped`；Docker Desktop 随系统启动时，未被手工停止的容器通常会自动恢复，但仍应执行 `ps`、health 和 ready 检查，不要只看容器名称判断可用。
+
+使用外部 PostgreSQL 时，开机和代码更新后的启动命令必须替换为 `make docker-up-external`。正常重启、每日同步和停止命令不变。详见 [external-postgresql.md](external-postgresql.md)。
 
 ## 每日数据维护
 
@@ -47,6 +50,7 @@ docker compose --env-file .env exec backend qdii coverage --latest-quarter
 make docker-restart
 docker compose --env-file .env ps
 curl --fail http://127.0.0.1:8000/health
+curl --fail http://127.0.0.1:8000/ready
 ```
 
 `restart` 不会重新构建镜像，也不会应用新的 Compose 配置或环境变量。
@@ -60,6 +64,8 @@ docker compose --env-file .env exec backend qdii doctor
 ```
 
 `up --build -d` 会重建有变化的镜像并重建需要更新的容器；不会删除数据卷。
+
+外部 PostgreSQL 部署在上述场景使用 `make docker-up-external`，避免切回内置数据库。
 
 ## 停止和再次启动
 
@@ -94,9 +100,10 @@ docker compose --env-file .env exec backend qdii backup
 make docker-up
 docker compose --env-file .env exec backend qdii doctor
 curl --fail http://127.0.0.1:8000/health
+curl --fail http://127.0.0.1:8000/ready
 ```
 
-如果 migration、health 或最小查询失败，保留容器日志和备份，不要自动 reset 数据库。恢复数据库是覆盖性操作，必须按 [operations.md](operations.md) 的确认流程执行。
+如果预检、migration、ready 或最小查询失败，保留容器日志和备份，不要 stamp、自动 reset 或修改 Alembic 版本。恢复数据库是覆盖性操作，必须按 [operations.md](operations.md) 的确认流程执行。
 
 ## 建议频率
 
