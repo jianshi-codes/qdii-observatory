@@ -6,7 +6,7 @@ UNIVERSE ?= examples/universe.sample.csv
 FUND_CODE ?=
 COMPOSE ?= docker compose --env-file .env
 
-.PHONY: setup init doctor docker-up docker-down docker-reset migrate dev-backend \
+.PHONY: setup init doctor docker-up docker-down docker-restart docker-daily docker-reset migrate dev-backend \
 	dev-frontend import-universe validate-universe demo sync-reports parse-reports sync-daily \
 	coverage analyze-fund backup restore lint typecheck test build check
 
@@ -25,6 +25,12 @@ docker-up:
 
 docker-down:
 	$(COMPOSE) down
+
+docker-restart:
+	$(COMPOSE) restart
+
+docker-daily:
+	$(COMPOSE) exec backend qdii sync-daily
 
 docker-reset:
 	@echo "This removes the project database volume. Run explicitly: docker compose --env-file .env down --volumes"

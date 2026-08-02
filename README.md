@@ -6,7 +6,7 @@
 
 ## 它解决什么问题
 
-- 任意 1–N 只基金，不要求固定名单或数量；CSV、XLSX、JSON 均可导入。
+- 任意 1–N 只基金，不要求固定名单或数量；可按基金公司、来源分类、研究口径选择，或输入六位基金代码，从公开信息核对后导入。
 - 识别同合同份额、ETF 联接、同指数族和报告基金持仓。
 - 保存来源 URL、原始文件本地路径、SHA-256、解析状态和质量问题。
 - 区分 NAV、场内价格和溢价率；比较国家、行业、前十大持仓、净值与相关性。
@@ -37,7 +37,16 @@ docker compose up --build
 
 默认仅绑定 `127.0.0.1`。打开 <http://127.0.0.1:5173>；API 文档位于 <http://127.0.0.1:8000/api/docs>。容器启动时会等待 PostgreSQL ready 并从空库执行 Alembic migration。
 
-## 导入基金 universe
+## 从公开信息添加基金
+
+打开“数据运维”页，可使用两种主入口：
+
+- 选择基金公司，再按来源分类和研究口径筛选并勾选基金；
+- 输入六位基金代码，核对公开名称、基金公司和分类后确认导入。
+
+只有显式选择的代码会写入本地数据库，原始公开响应会保存在本地 `.data/raw/catalog/` 并记录 URL、SHA-256 和 ingestion run。第三方目录可能延迟或变更，应以基金公司正式资料为准。
+
+CSV、XLSX、JSON 作为高级批量或离线导入入口继续保留：
 
 ```bash
 qdii validate-universe --file examples/universe.sample.csv
@@ -89,13 +98,13 @@ make dev-frontend      # 终端 2
 make check
 ```
 
-常用运维命令包括 `qdii init`、`qdii doctor`、`qdii backup`、`qdii restore --file ... --confirm`，以及 `make docker-up`、`make docker-down`、`make migrate`。`docker compose down` 不删除 volume。
+常用运维命令包括 `qdii init`、`qdii doctor`、`qdii backup`、`qdii restore --file ... --confirm`，以及 `make docker-up`、`make docker-restart`、`make docker-daily`、`make docker-down`、`make migrate`。`docker compose down` 不删除 volume。电脑开机后的启动、每日维护、停止、重启和代码更新步骤见 [docs/daily-operations.md](docs/daily-operations.md)。
 
 ## 文档入口
 
 - [快速开始](docs/quickstart.md) · [配置](docs/configuration.md) · [架构](docs/architecture.md)
 - [报告解析](docs/report-parsing.md) · [穿透](docs/lookthrough.md) · [披露持仓一致性](docs/disclosed-holdings-analysis.md)
-- [数据来源](docs/data-sources.md) · [运维](docs/operations.md) · [故障排查](docs/troubleshooting.md)
+- [数据来源](docs/data-sources.md) · [每日维护与重启](docs/daily-operations.md) · [运维/备份](docs/operations.md) · [故障排查](docs/troubleshooting.md)
 - [贡献指南](CONTRIBUTING.md) · [安全](SECURITY.md) · [公开发布清单](PUBLIC_RELEASE_CHECKLIST.md)
 
 ## License
