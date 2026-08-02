@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.orm import Session
 
-from backend.app import cli, database
+from backend.app import cli, database, operations
 from backend.app.config import get_settings
 from backend.app.ingestion import report_pipeline, storage
 from backend.app.ingestion.providers import reports as report_providers
@@ -82,6 +82,19 @@ def test_storage_preflight_command_emits_machine_readable_result(
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "ok"
     assert payload["targets"][0]["path"] == str(tmp_path)
+
+
+def test_project_init_creates_private_and_raw_data_directories(tmp_path: Path) -> None:
+    (tmp_path / ".env.example").write_text("QDII_EXAMPLE=true\n", encoding="utf-8")
+    (tmp_path / "config").mkdir()
+
+    first = operations.initialize_project(tmp_path)
+    second = operations.initialize_project(tmp_path)
+
+    assert ".data/private" in first.created
+    assert ".data/raw" in first.created
+    assert ".data/private" in second.preserved
+    assert ".data/raw" in second.preserved
 
 
 def test_sync_reports_command_wires_provider_pipeline_and_single_fund_filter(

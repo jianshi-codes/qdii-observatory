@@ -13,6 +13,7 @@ from backend.app.ingestion.providers.base import (
     FundCompanyChoice,
     PublicFundCandidate,
 )
+from backend.app.ingestion.storage import StoragePreflightError
 from backend.app.models import FundContract, SourceArtifact
 
 
@@ -107,3 +108,24 @@ def test_catalog_api_supports_choices_lookup_and_explicit_import(
     assert db_session.scalar(select(SourceArtifact.source_url)) == (
         "https://example.invalid/public-fund/900001"
     )
+
+
+def test_catalog_import_reports_unavailable_raw_storage(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable_storage() -> Path:
+        raise StoragePreflightError("QDII_RAW_DATA_DIR does not exist: /data/raw")
+
+    monkeypatch.setattr("backend.app.api.raw_data_dir", unavailable_storage)
+    client.app.dependency_overrides[get_fund_catalog_provider] = FakeCatalogProvider
+
+    response = client.post("/api/fund-catalog/import", json={"fund_codes": ["900001"]})
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": (
+            "Raw data storage is unavailable: "
+            "QDII_RAW_DATA_DIR does not exist: /data/raw"
+        )
+    }

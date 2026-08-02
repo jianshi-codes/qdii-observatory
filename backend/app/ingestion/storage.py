@@ -83,6 +83,15 @@ def storage_preflight(min_free_bytes: int | None = None) -> tuple[StorageTarget,
     """
 
     root = repository_root().resolve()
+    configured_managed_root = os.getenv("QDII_MANAGED_DATA_ROOT")
+    managed_root = None
+    if configured_managed_root:
+        candidate = Path(configured_managed_root).expanduser()
+        managed_root = (candidate if candidate.is_absolute() else root / candidate).resolve()
+        if not managed_root.is_dir():
+            raise StoragePreflightError(
+                f"QDII_MANAGED_DATA_ROOT is not an existing directory: {managed_root}"
+            )
     minimum = min_free_bytes
     if minimum is None:
         minimum = int(os.getenv("QDII_MIN_FREE_BYTES", str(DEFAULT_MIN_FREE_BYTES)))
@@ -91,15 +100,16 @@ def storage_preflight(min_free_bytes: int | None = None) -> tuple[StorageTarget,
         path = configured if configured.is_absolute() else root / configured
         path = path.resolve()
         external = not _inside(path, root)
+        managed = managed_root is not None and _inside(path, managed_root)
         if not path.exists():
-            if external:
+            if external and not managed:
                 raise StoragePreflightError(
                     f"{name} does not exist: {path}. External paths are never auto-created."
                 )
             path.mkdir(parents=True, exist_ok=True)
         if not path.is_dir():
             raise StoragePreflightError(f"{name} is not a directory: {path}")
-        if external and path.stat().st_dev == Path(path.anchor).stat().st_dev:
+        if external and not managed and path.stat().st_dev == Path(path.anchor).stat().st_dev:
             raise StoragePreflightError(
                 f"{name} appears to be on the system filesystem, not a mounted "
                 f"external volume: {path}"

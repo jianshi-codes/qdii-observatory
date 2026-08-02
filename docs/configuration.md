@@ -12,6 +12,7 @@
 | `QDII_EXTERNAL_ADMIN_DATABASE_URL` | 未设置 | 仅供一次性外部建库容器使用的维护库 URL |
 | `QDII_AUTO_CREATE_DATABASE` | `false` | 必须严格设置为 `true` 才授权创建缺失的目标 database |
 | `QDII_RAW_DATA_DIR` | `.data/raw` | 原始来源归档 |
+| `QDII_MANAGED_DATA_ROOT` | 未设置（Docker 中为 `/data`） | 允许在这个已存在的受管根目录下创建缺失的数据子目录；不会授权创建根目录本身或其他外部路径 |
 | `QDII_ENABLE_PORTFOLIO` | `false` | Portfolio 总开关 |
 | `QDII_PROVIDERS_CONFIG` | `config/providers.local.yaml` | Provider 配置；不存在时读取 example |
 | `QDII_CORS_ORIGINS` | 空（`qdii init` 示例为 loopback 前端） | 逗号分隔的精确 origin |

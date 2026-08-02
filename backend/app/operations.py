@@ -31,12 +31,12 @@ def initialize_project(root: Path) -> InitResult:
     preserved: list[str] = []
     env_target = root / ".env"
     _copy_if_absent(root / ".env.example", env_target, root, created, preserved)
-    private_dir = root / ".data" / "private"
-    if private_dir.exists():
-        preserved.append(str(private_dir.relative_to(root)))
-    else:
-        private_dir.mkdir(parents=True)
-        created.append(str(private_dir.relative_to(root)))
+    for data_dir in (root / ".data" / "private", root / ".data" / "raw"):
+        if data_dir.exists():
+            preserved.append(str(data_dir.relative_to(root)))
+        else:
+            data_dir.mkdir(parents=True)
+            created.append(str(data_dir.relative_to(root)))
     overrides = {
         root / "config" / "fund-analysis-proxies.local.yaml": "funds: {}\n",
         root / "config" / "analysis-security-map.local.yaml": "securities: {}\n",

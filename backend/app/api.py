@@ -25,7 +25,7 @@ from backend.app.ingestion.providers.catalog import (
     SOURCE_CATEGORIES,
     EastmoneyFundCatalogProvider,
 )
-from backend.app.ingestion.storage import raw_data_dir
+from backend.app.ingestion.storage import StoragePreflightError, raw_data_dir
 from backend.app.models import (
     DailyExchangePrice,
     DailyExchangeRate,
@@ -596,7 +596,14 @@ def import_selected_public_funds(
     invalid = [code for code in codes if len(code) != 6 or not code.isdigit()]
     if invalid:
         raise HTTPException(status_code=422, detail=f"Invalid six-digit fund codes: {invalid}")
-    result = import_public_funds(db, provider, raw_data_dir(), codes)
+    try:
+        raw_root = raw_data_dir()
+    except StoragePreflightError as error:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Raw data storage is unavailable: {error}",
+        ) from error
+    result = import_public_funds(db, provider, raw_root, codes)
     return PublicFundImportRead(
         status=result.status,
         imported_codes=list(result.imported_codes),

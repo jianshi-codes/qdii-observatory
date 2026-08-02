@@ -28,6 +28,26 @@ def test_explicit_missing_external_storage_fails_without_creating_or_falling_bac
     assert not missing_raw.exists()
 
 
+def test_missing_storage_inside_explicit_managed_root_is_created(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    managed_root = tmp_path / "managed-data"
+    repository.mkdir()
+    managed_root.mkdir()
+    raw = managed_root / "raw"
+    monkeypatch.setattr(storage_module, "repository_root", lambda: repository)
+    monkeypatch.setenv("QDII_RAW_DATA_DIR", str(raw))
+    monkeypatch.setenv("QDII_MANAGED_DATA_ROOT", str(managed_root))
+
+    targets = storage_preflight(min_free_bytes=0)
+
+    assert targets[0].path == raw
+    assert targets[0].external is True
+    assert raw.is_dir()
+
+
 def test_explicit_external_path_on_system_filesystem_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
