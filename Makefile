@@ -25,7 +25,8 @@ docker-up:
 	$(COMPOSE) up --build -d
 
 docker-up-external:
-	$(COMPOSE_EXTERNAL) up --build -d
+	$(COMPOSE_EXTERNAL) run --build --rm database-provision
+	$(COMPOSE_EXTERNAL) up --build -d backend frontend
 
 docker-down:
 	$(COMPOSE) down
@@ -99,4 +100,4 @@ build:
 check: lint typecheck test build
 	git diff --check
 	docker compose --env-file .env.example config --quiet
-	QDII_EXTERNAL_DATABASE_URL=postgresql+psycopg://user:password@db.example:5432/qdii_observatory docker compose --env-file .env.example -f compose.yaml -f compose.external.yaml config --quiet
+	QDII_EXTERNAL_DATABASE_URL=postgresql+psycopg://user:password@db.example:5432/qdii_observatory QDII_EXTERNAL_ADMIN_DATABASE_URL=postgresql+psycopg://admin:password@db.example:5432/postgres QDII_AUTO_CREATE_DATABASE=true docker compose --env-file .env.example -f compose.yaml -f compose.external.yaml config --quiet

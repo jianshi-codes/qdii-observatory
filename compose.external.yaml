@@ -2,6 +2,18 @@ services:
   postgres:
     profiles: ["bundled-db"]
 
+  database-provision:
+    profiles: ["provision"]
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: "no"
+    command: ["python", "-m", "backend.app.database_provision"]
+    environment:
+      QDII_DATABASE_URL: ${QDII_EXTERNAL_DATABASE_URL:?set QDII_EXTERNAL_DATABASE_URL to the target PostgreSQL database}
+      QDII_EXTERNAL_ADMIN_DATABASE_URL: ${QDII_EXTERNAL_ADMIN_DATABASE_URL:-}
+      QDII_AUTO_CREATE_DATABASE: ${QDII_AUTO_CREATE_DATABASE:-false}
+
   backend:
     environment:
-      QDII_DATABASE_URL: ${QDII_EXTERNAL_DATABASE_URL:?set QDII_EXTERNAL_DATABASE_URL to an existing PostgreSQL database}
+      QDII_DATABASE_URL: ${QDII_EXTERNAL_DATABASE_URL:?set QDII_EXTERNAL_DATABASE_URL to the target PostgreSQL database}

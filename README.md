@@ -37,7 +37,7 @@ docker compose up --build
 
 默认仅绑定 `127.0.0.1`。打开 <http://127.0.0.1:5173>；API 文档位于 <http://127.0.0.1:8000/api/docs>。容器启动时会等待 PostgreSQL 可连接，执行数据库预检，并从空库运行 Alembic migration。
 
-也可以使用已经创建好 database 的专用外部 PostgreSQL。外部模式不会启动内置 PG，会在 migration 前区分空库、受管库和冲突库，并拒绝认领未知表：
+也可以使用专用外部 PostgreSQL。外部模式不会启动内置 PG，会在 migration 前区分空库、受管库和冲突库，并拒绝认领未知表：
 
 ```bash
 # 在 .env 设置 QDII_EXTERNAL_DATABASE_URL 后
@@ -46,6 +46,7 @@ curl --fail http://127.0.0.1:8000/ready
 ```
 
 完整前置条件与冲突处理见 [docs/external-postgresql.md](docs/external-postgresql.md)。
+目标 database 默认仍需预先建立；只有同时设置独立管理员 URL 和 `QDII_AUTO_CREATE_DATABASE=true` 时，一次性 provision 容器才会显式检查并按需建库。它不会创建 role，也不会把管理员连接交给长期运行的 backend。
 
 ## 从公开信息添加基金
 

@@ -1,10 +1,10 @@
 # 外部 PostgreSQL 模式
 
-外部模式适合连接已经由用户或平台管理员创建的专用 PostgreSQL database。项目不会创建 PostgreSQL role 或 database，也不会自动认领未知表。当前部署基线和持续验证使用 PostgreSQL 16。
+外部模式适合连接专用 PostgreSQL database。默认情况下，database 仍由用户或平台管理员预先创建；也可以提供独立管理员连接并显式授权一次性自动建库。项目不会创建 PostgreSQL role，也不会自动认领未知表。当前部署基线和持续验证使用 PostgreSQL 16。
 
 ## 前置条件
 
-- 目标 database 已存在，建议只供本项目使用；不要与其他应用共用默认 schema。
+- 目标 database 建议只供本项目使用；不要与其他应用共用默认 schema。
 - 连接用户拥有 database 的 `CONNECT` 权限，以及目标 schema 的建表、修改表、创建索引和约束权限。由该用户拥有 database 是最简单的配置。
 - Docker 主机能够解析并访问外部 PG 地址；云数据库的防火墙、TLS 和证书要求已配置。
 - URL 中的特殊字符已经百分号编码；真实 URL 只写入 ignored 的 `.env`，不要提交到 Git。
@@ -15,7 +15,27 @@
 QDII_EXTERNAL_DATABASE_URL=postgresql+psycopg://user:encoded-password@db.example:5432/qdii_observatory
 ```
 
-这里的 database `qdii_observatory` 必须预先存在。仅有 PostgreSQL 实例而没有这个 database 时，连接会失败，项目不会越权创建它。
+默认情况下，database `qdii_observatory` 必须预先存在。仅有 PostgreSQL 实例而没有这个 database 时，连接会失败。
+
+## 显式授权自动建库
+
+管理员先创建低权限应用 role，但可以不创建目标 database。然后在 `.env` 增加：
+
+```dotenv
+QDII_EXTERNAL_ADMIN_DATABASE_URL=postgresql+psycopg://admin:encoded-admin-password@db.example:5432/postgres
+QDII_AUTO_CREATE_DATABASE=true
+```
+
+授权边界：
+
+- `QDII_AUTO_CREATE_DATABASE` 只接受 `true` 或 `false`；缺省和 `false` 都不打开管理员连接。
+- 管理员 URL 必须使用与应用 role 不同的管理员 role，并连接同一主机和端口上的另一个已存在维护库，通常是 `postgres`。
+- 目标应用 role 必须已经存在。管理员需要 `CREATEDB`，并且能够把新 database 的 owner 指定为应用 role。
+- provision 先查询 `pg_database`：存在时返回 `EXISTING`，不存在时才执行带安全 identifier quoting 的 `CREATE DATABASE ... OWNER ...`。
+- 并发创建产生 `DuplicateDatabase` 时会重新查询；只有确认目标库存在才继续。
+- 管理员 URL 只注入自动删除的一次性 provision 容器，不传给长期运行的 backend。
+
+`make docker-up-external` 会先运行一次性 provision，再启动 backend/frontend。任一步失败都会阻止后续启动。关闭自动建库时不需要配置管理员 URL，行为与原先一致。
 
 ## 启动和验证
 
@@ -25,7 +45,7 @@ docker compose --env-file .env -f compose.yaml -f compose.external.yaml ps
 curl --fail http://127.0.0.1:8000/ready
 ```
 
-外部 overlay 会让内置 `postgres` 服务进入非默认 profile，因此不会启动本地 PG 容器。backend 只读取 `QDII_EXTERNAL_DATABASE_URL`。不要用 `make docker-up` 代替上面的外部启动命令；默认命令始终选择内置 PostgreSQL。
+外部 overlay 会让内置 `postgres` 服务进入非默认 profile，因此不会启动本地 PG 容器。长期运行的 backend 只读取 `QDII_EXTERNAL_DATABASE_URL`。不要用 `make docker-up` 代替上面的外部启动命令；默认命令始终选择内置 PostgreSQL。
 
 正常 `restart`、每日同步和停止仍可使用：
 
