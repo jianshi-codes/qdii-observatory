@@ -188,8 +188,14 @@ class ResearchScopeChoiceRead(ApiModel):
     label: str
 
 
+class SourceCategoryChoiceRead(ApiModel):
+    value: str
+    label: str
+
+
 class FundCatalogOptionsRead(ApiModel):
     companies: list[FundCompanyChoiceRead]
+    source_categories: list[SourceCategoryChoiceRead]
     research_scopes: list[ResearchScopeChoiceRead]
     source_provider: str
     source_notice: str
@@ -198,8 +204,8 @@ class FundCatalogOptionsRead(ApiModel):
 class PublicFundCandidateRead(ApiModel):
     fund_code: str
     fund_name: str
-    manager_code: str
-    manager_name: str
+    manager_code: str | None
+    manager_name: str | None
     category: str
     research_scope: str
     currency: str

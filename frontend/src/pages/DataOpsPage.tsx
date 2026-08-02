@@ -197,10 +197,10 @@ export function DataOpsPage() {
         {providerHealthQuery.isError && <ErrorPanel compact error={providerHealthQuery.error} onRetry={() => providerHealthQuery.refetch()} />}
         {providerHealthQuery.isSuccess && providerHealthQuery.data.length === 0 && <EmptyPanel compact title="没有 Provider 配置" detail="复制并编辑 config/providers.example.yaml。" />}
         {providerHealthQuery.isSuccess && providerHealthQuery.data.length > 0 && (
-          <div className="run-list">
+          <div className="provider-health-list">
             {providerHealthQuery.data.map((provider) => (
-              <div className="run-row" key={provider.name}>
-                <div><strong>{provider.name}</strong><small>priority {provider.priority}</small></div>
+              <div className="provider-health-row" key={provider.name}>
+                <div className="provider-health-copy"><strong>{provider.name}</strong><small>优先级 {provider.priority}</small></div>
                 <StatusBadge value={provider.status.toLowerCase()} label={provider.status} />
               </div>
             ))}
@@ -304,7 +304,7 @@ export function DataOpsPage() {
 
 function CatalogImportPanel({ onImported }: { onImported: () => void }) {
   const [companyCode, setCompanyCode] = useState('')
-  const [category, setCategory] = useState('ALL')
+  const [sourceCategory, setSourceCategory] = useState('ALL')
   const [researchScope, setResearchScope] = useState('ALL')
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set())
   const [fundCode, setFundCode] = useState('')
@@ -314,10 +314,17 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
     queryFn: ({ signal }) => api.fundCatalogOptions(signal),
     staleTime: 60 * 60 * 1000,
   })
+  const hasCatalogFilter = Boolean(companyCode)
+    || sourceCategory !== 'ALL'
+    || researchScope !== 'ALL'
   const candidatesQuery = useQuery({
-    queryKey: ['fund-catalog-candidates', companyCode],
-    queryFn: ({ signal }) => api.fundCatalogCandidates(companyCode, signal),
-    enabled: Boolean(companyCode),
+    queryKey: ['fund-catalog-candidates', companyCode, sourceCategory, researchScope],
+    queryFn: ({ signal }) => api.fundCatalogCandidates({
+      companyCode,
+      sourceCategory,
+      researchScope,
+    }, signal),
+    enabled: hasCatalogFilter,
     staleTime: 15 * 60 * 1000,
   })
   const lookupMutation = useMutation({
@@ -331,18 +338,10 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
     },
   })
 
-  const candidates = useMemo(() => {
-    const rows = candidatesQuery.data?.items ?? []
-    return rows.filter((item) => (
-      (category === 'ALL' || item.category === category)
-      && (researchScope === 'ALL' || item.research_scope === researchScope)
-    ))
-  }, [candidatesQuery.data, category, researchScope])
+  const candidates = useMemo(() => candidatesQuery.data?.items ?? [], [candidatesQuery.data])
 
-  function changeCompany(value: string) {
-    setCompanyCode(value)
-    setCategory('ALL')
-    setResearchScope('ALL')
+  function changeFilter(update: () => void) {
+    update()
     setSelectedCodes(new Set())
   }
 
@@ -367,7 +366,7 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
           <div>
             <span className="section-kicker">PUBLIC FUND CATALOG</span>
             <h2 id="catalog-import-title">从公开信息选择基金</h2>
-            <p>先选基金公司，再按来源分类和研究口径筛选；只有勾选的基金代码会写入本地 universe。</p>
+            <p>基金公司、来源分类、研究口径可单独使用或任意组合；只有勾选的基金代码会写入本地 universe。</p>
           </div>
           <Database size={20} />
         </div>
@@ -378,8 +377,8 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
             <div className="catalog-filter-grid">
               <label>
                 <span>基金公司</span>
-                <select value={companyCode} onChange={(event) => changeCompany(event.target.value)}>
-                  <option value="">请选择基金公司</option>
+                <select value={companyCode} onChange={(event) => changeFilter(() => setCompanyCode(event.target.value))}>
+                  <option value="">全部基金公司</option>
                   {optionsQuery.data.companies.map((company) => (
                     <option key={company.company_code} value={company.company_code}>{company.company_name}</option>
                   ))}
@@ -387,24 +386,26 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
               </label>
               <label>
                 <span>来源分类</span>
-                <select value={category} onChange={(event) => setCategory(event.target.value)} disabled={!candidatesQuery.data}>
-                  <option value="ALL">全部分类</option>
-                  {(candidatesQuery.data?.categories ?? []).map((item) => <option key={item}>{item}</option>)}
+                <select value={sourceCategory} onChange={(event) => changeFilter(() => setSourceCategory(event.target.value))}>
+                  {optionsQuery.data.source_categories.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
                 </select>
               </label>
               <label>
                 <span>研究口径</span>
-                <select value={researchScope} onChange={(event) => setResearchScope(event.target.value)}>
+                <select value={researchScope} onChange={(event) => changeFilter(() => setResearchScope(event.target.value))}>
                   {optionsQuery.data.research_scopes.map((scope) => (
                     <option key={scope.value} value={scope.value}>{scope.label}</option>
                   ))}
                 </select>
               </label>
             </div>
-            <p className="panel-note">{optionsQuery.data.source_notice} “研究口径”是本项目的名称规则筛选，不是来源方分类或投资建议。</p>
+            <p className="panel-note">{optionsQuery.data.source_notice} “研究口径”按公开基金名称启发式匹配、按份额代码返回，不等于人工归并后的基金合同清单，也不是投资建议。</p>
           </>
         )}
-        {candidatesQuery.isPending && <LoadingPanel label="读取该基金公司的 QDII 清单…" />}
+        {!hasCatalogFilter && optionsQuery.isSuccess && <EmptyPanel compact title="请选择至少一个筛选条件" detail="基金公司、来源分类、研究口径均可作为第一个条件，也可以单独查询。" />}
+        {hasCatalogFilter && candidatesQuery.isPending && <LoadingPanel label="读取公开 QDII 清单…" />}
         {candidatesQuery.isError && <ErrorPanel compact error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
         {candidatesQuery.isSuccess && candidates.length === 0 && <EmptyPanel compact title="当前筛选没有基金" detail="可更换来源分类或研究口径；不会用相似基金自动补位。" />}
         {candidatesQuery.isSuccess && candidates.length > 0 && (
@@ -420,7 +421,7 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
               ))}
             </div>
             <div className="catalog-actions">
-              <span>已选择 <strong>{selectedCodes.size}</strong> 只</span>
+              <span>已选择 <strong>{selectedCodes.size}</strong> 个份额代码</span>
               <button
                 className="button button-primary"
                 type="button"

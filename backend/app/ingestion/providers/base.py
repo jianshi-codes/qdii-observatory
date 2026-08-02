@@ -141,8 +141,8 @@ class FundCompanyChoice:
 class PublicFundCandidate:
     fund_code: str
     fund_name: str
-    manager_code: str
-    manager_name: str
+    manager_code: str | None
+    manager_name: str | None
     category: str
     research_scope: str
     currency: str
@@ -218,5 +218,7 @@ class FundCatalogProvider(Protocol):
     def companies(self) -> tuple[FundCompanyChoice, ...]: ...
 
     def discover_company(self, company_code: str) -> FundCatalogSnapshot: ...
+
+    def discover_public(self, source_category: str | None = None) -> FundCatalogSnapshot: ...
 
     def lookup(self, fund_code: str) -> FundCatalogSnapshot: ...

@@ -22,6 +22,7 @@ from backend.app.ingestion.provider_registry import load_provider_registry, prov
 from backend.app.ingestion.providers.base import FundCatalogProvider, ProviderSchemaError
 from backend.app.ingestion.providers.catalog import (
     RESEARCH_SCOPES,
+    SOURCE_CATEGORIES,
     EastmoneyFundCatalogProvider,
 )
 from backend.app.ingestion.storage import raw_data_dir
@@ -89,6 +90,7 @@ from backend.app.schemas import (
     ResearchScopeChoiceRead,
     ReturnCorrelationRead,
     SecurityHoldingRead,
+    SourceCategoryChoiceRead,
 )
 
 router = APIRouter(prefix="/api")
@@ -515,6 +517,10 @@ def get_fund_catalog_options(provider: CatalogProvider) -> FundCatalogOptionsRea
             )
             for item in companies
         ],
+        source_categories=[
+            SourceCategoryChoiceRead(value=value, label=label)
+            for value, label in SOURCE_CATEGORIES
+        ],
         research_scopes=[
             ResearchScopeChoiceRead(value=value, label=label)
             for value, label in RESEARCH_SCOPES
@@ -527,12 +533,25 @@ def get_fund_catalog_options(provider: CatalogProvider) -> FundCatalogOptionsRea
 @router.get("/fund-catalog/candidates", response_model=FundCatalogCandidatesRead)
 def get_fund_catalog_candidates(
     provider: CatalogProvider,
-    company_code: Annotated[str, Query(pattern=r"^[0-9]{8}$")],
+    company_code: Annotated[str | None, Query(pattern=r"^[0-9]{8}$")] = None,
+    source_category: Annotated[
+        str | None,
+        Query(pattern=r"^(311|312|313|317|320|330|340)$"),
+    ] = None,
     category: str | None = None,
     research_scope: str | None = None,
 ) -> FundCatalogCandidatesRead:
     try:
-        snapshot = provider.discover_company(company_code)
+        snapshot = (
+            provider.discover_company(company_code)
+            if company_code
+            else provider.discover_public(source_category)
+        )
+        source_codes = (
+            {item.fund_code for item in provider.discover_public(source_category).candidates}
+            if company_code and source_category
+            else None
+        )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (ProviderSchemaError, ProviderHttpError) as error:
@@ -541,7 +560,8 @@ def get_fund_catalog_candidates(
     candidates = [
         item
         for item in snapshot.candidates
-        if (category is None or item.category == category)
+        if (source_codes is None or item.fund_code in source_codes)
+        and (category is None or item.category == category)
         and (research_scope in (None, "ALL") or item.research_scope == research_scope)
     ]
     return FundCatalogCandidatesRead(

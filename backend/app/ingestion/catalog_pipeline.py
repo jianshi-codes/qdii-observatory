@@ -10,7 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.ingestion.archive import archive_bytes
-from backend.app.ingestion.providers.base import FundCatalogProvider, FundCatalogSnapshot
+from backend.app.ingestion.providers.base import (
+    FundCatalogProvider,
+    FundCatalogSnapshot,
+    ProviderSchemaError,
+)
 from backend.app.ingestion.runs import finish_run, record_issue, start_run
 from backend.app.ingestion.universe import (
     ContractInput,
@@ -48,6 +52,10 @@ def import_public_funds(
         try:
             snapshot = provider.lookup(code)
             candidate = snapshot.candidates[0]
+            if not candidate.manager_name:
+                raise ProviderSchemaError(
+                    f"Exact public fund metadata is missing manager_name for {code}"
+                )
             universe = UniverseInput(
                 workbook=Path(f"public-catalog-{code}.json"),
                 requested_sheet="PUBLIC_CATALOG",

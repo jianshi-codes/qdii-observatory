@@ -2152,6 +2152,26 @@ a.portfolio-fx-source:hover {
   flex-direction: column;
 }
 
+.provider-health-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.provider-health-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.provider-health-row:last-child { border-bottom: 0; }
+.provider-health-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.provider-health-copy strong { overflow-wrap: anywhere; color: var(--ink); font-size: 11px; }
+.provider-health-copy small { color: var(--ink-faint); font-size: 9px; }
+.provider-health-row .status-badge { justify-self: end; }
+
 .run-row {
   display: grid;
   grid-template-columns: 13px minmax(0, 1fr) auto;

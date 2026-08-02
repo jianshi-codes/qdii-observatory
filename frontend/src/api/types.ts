@@ -55,6 +55,7 @@ export interface ResearchScopeChoice {
 
 export interface FundCatalogOptions {
   companies: FundCompanyChoice[]
+  source_categories: ResearchScopeChoice[]
   research_scopes: ResearchScopeChoice[]
   source_provider: string
   source_notice: string
@@ -63,8 +64,8 @@ export interface FundCatalogOptions {
 export interface PublicFundCandidate {
   fund_code: string
   fund_name: string
-  manager_code: string
-  manager_name: string
+  manager_code: string | null
+  manager_name: string | null
   category: string
   research_scope: string
   currency: string

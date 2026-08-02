@@ -21,10 +21,12 @@ COMPANY_DOCUMENT = re.compile(
     r"^\s*var\s+FundCommpanyInfos\s*=\s*(\[.*\])\s*;?\s*$",
     re.DOTALL,
 )
+PUBLIC_CATALOG_DOCUMENT = re.compile(r"datas:(\[.*?\]),count:", re.DOTALL)
+PUBLIC_CATALOG_RECORD = re.compile(r',record:"([0-9]+)"')
 
 RESEARCH_SCOPES = (
     ("ALL", "全部 QDII"),
-    ("TECHNOLOGY", "科技 / 数字经济"),
+    ("TECHNOLOGY", "名称关键词：科技 / 数字经济"),
     ("EQUITY", "权益"),
     ("FIXED_INCOME", "固收"),
     ("COMMODITY", "商品"),
@@ -32,14 +34,29 @@ RESEARCH_SCOPES = (
     ("OTHER", "其他"),
 )
 
+SOURCE_CATEGORIES = (
+    ("ALL", "全部来源分类"),
+    ("311", "全球股票"),
+    ("312", "亚太股票"),
+    ("313", "大中华区股票"),
+    ("317", "美国股票"),
+    ("320", "股债混合"),
+    ("330", "债券"),
+    ("340", "商品"),
+)
+SOURCE_CATEGORY_LABELS = dict(SOURCE_CATEGORIES)
+PUBLIC_CATALOG_PAGE_SIZE = 200
+PUBLIC_CATALOG_MAX_PAGES = 5
+
 
 class EastmoneyFundCatalogProvider:
     """Discover public fund metadata without treating the source as authoritative advice."""
 
     name = "EASTMONEY_FUND_CATALOG"
-    version = "company-f10-search-v1"
+    version = "public-list-company-f10-search-v2"
     companies_endpoint = "https://fund.eastmoney.com/api/static/FundCommpanyInfo.js"
     company_endpoint = "https://fund.eastmoney.com/Company/f10/jjjz_{company_code}.html"
+    public_catalog_endpoint = "https://fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx"
     search_endpoint = "https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx"
 
     def __init__(self, http: ProviderHttpClient) -> None:
@@ -111,6 +128,102 @@ class EastmoneyFundCatalogProvider:
             raw_payload=response.content,
             source_url=str(response.url),
             mime_type=response.headers.get("content-type", "text/html").split(";", 1)[0],
+        )
+
+    def discover_public(self, source_category: str | None = None) -> FundCatalogSnapshot:
+        category = source_category or "ALL"
+        if category not in SOURCE_CATEGORY_LABELS:
+            raise ValueError("source_category is not present in the public QDII taxonomy")
+        params: dict[str, str] = {
+            "t": "10",
+            "lx": "7",
+            "letter": "",
+            "gsid": "",
+            "text": "",
+            "sort": "rzdf,desc",
+            "atfc": "",
+            "onlySale": "0",
+            "isLatest": "0",
+        }
+        if category != "ALL":
+            params["feature"] = category
+        rows: list[Any] = []
+        payloads: list[bytes] = []
+        source_url = ""
+        mime_type = "text/javascript"
+        expected_record: int | None = None
+        expected_pages = 1
+        page_number = 1
+        while page_number <= expected_pages:
+            params["page"] = f"{page_number},{PUBLIC_CATALOG_PAGE_SIZE}"
+            response = self.http.request("GET", self.public_catalog_endpoint, params=params)
+            if not source_url:
+                source_url = str(response.url)
+                mime_type = response.headers.get(
+                    "content-type", "text/javascript"
+                ).split(";", 1)[0]
+            payloads.append(response.content)
+            try:
+                text = response.content.decode(response.encoding or "utf-8-sig")
+            except UnicodeDecodeError as error:
+                raise ProviderSchemaError("Public QDII catalog cannot be decoded") from error
+            match = PUBLIC_CATALOG_DOCUMENT.search(text)
+            if match is None:
+                raise ProviderSchemaError("Public QDII catalog wrapper changed")
+            try:
+                page_rows = json.loads(match.group(1))
+            except json.JSONDecodeError as error:
+                raise ProviderSchemaError(
+                    "Public QDII catalog contains invalid JSON rows"
+                ) from error
+            if not isinstance(page_rows, list):
+                raise ProviderSchemaError("Public QDII catalog datas must be an array")
+            record_match = PUBLIC_CATALOG_RECORD.search(text)
+            if record_match is None:
+                raise ProviderSchemaError("Public QDII catalog is missing record count")
+            page_record = int(record_match.group(1))
+            if expected_record is None:
+                expected_record = page_record
+                expected_pages = max(
+                    1,
+                    (expected_record + PUBLIC_CATALOG_PAGE_SIZE - 1)
+                    // PUBLIC_CATALOG_PAGE_SIZE,
+                )
+                if expected_pages > PUBLIC_CATALOG_MAX_PAGES:
+                    raise ProviderSchemaError("Public QDII catalog exceeds the bounded page limit")
+            elif page_record != expected_record:
+                raise ProviderSchemaError("Public QDII catalog record count changed between pages")
+            rows.extend(page_rows)
+            page_number += 1
+        candidates: dict[str, PublicFundCandidate] = {}
+        for raw in rows:
+            if not isinstance(raw, list) or len(raw) < 2:
+                raise ProviderSchemaError("Public QDII catalog row is missing code or name")
+            code = str(raw[0]).strip()
+            name = str(raw[1]).strip()
+            if not FUND_CODE.fullmatch(code) or not name:
+                raise ProviderSchemaError("Public QDII catalog row has invalid code or name")
+            candidates[code] = _candidate(
+                fund_code=code,
+                fund_name=name,
+                manager_code=None,
+                manager_name=None,
+                category=(
+                    SOURCE_CATEGORY_LABELS[category]
+                    if category != "ALL"
+                    else "QDII（来源未细分）"
+                ),
+                source_url=source_url,
+            )
+        if not candidates:
+            raise ProviderSchemaError("Public QDII catalog contains no recognizable fund rows")
+        if expected_record is None or len(rows) < expected_record:
+            raise ProviderSchemaError("Public QDII catalog response is incomplete")
+        return FundCatalogSnapshot(
+            candidates=tuple(candidates.values()),
+            raw_payload=b"\n".join(payloads),
+            source_url=source_url,
+            mime_type=mime_type,
         )
 
     def lookup(self, fund_code: str) -> FundCatalogSnapshot:
@@ -214,8 +327,8 @@ def _candidate(
     *,
     fund_code: str,
     fund_name: str,
-    manager_code: str,
-    manager_name: str,
+    manager_code: str | None,
+    manager_name: str | None,
     category: str,
     source_url: str,
 ) -> PublicFundCandidate:

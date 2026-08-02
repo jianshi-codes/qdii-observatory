@@ -57,6 +57,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
       if (path === '/api/provider-health') return response({ items: [] })
       if (path === '/api/fund-catalog/options') return response({
         companies: [],
+        source_categories: [{ value: 'ALL', label: '全部来源分类' }],
         research_scopes: [{ value: 'ALL', label: '全部 QDII' }],
         source_provider: 'fixture',
         source_notice: '公开来源提示',
@@ -79,7 +80,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(screen.getByText('两只份额缺少今日渠道快照')).toBeInTheDocument()
   })
 
-  it('discovers by company and imports only explicitly selected public funds', async () => {
+  it('discovers by an independent source category and imports only explicitly selected funds', async () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
@@ -98,6 +99,10 @@ describe('DataOpsPage purchase-limit coverage', () => {
       if (path === '/api/provider-health') return response({ items: [] })
       if (path === '/api/fund-catalog/options') return response({
         companies: [{ company_code: '80009999', company_name: '示例基金' }],
+        source_categories: [
+          { value: 'ALL', label: '全部来源分类' },
+          { value: '311', label: '全球股票' },
+        ],
         research_scopes: [
           { value: 'ALL', label: '全部 QDII' },
           { value: 'TECHNOLOGY', label: '科技 / 数字经济' },
@@ -105,7 +110,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
         source_provider: 'fixture',
         source_notice: '公开来源提示',
       })
-      if (path === '/api/fund-catalog/candidates?company_code=80009999') return response({
+      if (path === '/api/fund-catalog/candidates?source_category=311') return response({
         items: [{
           fund_code: '900001',
           fund_name: '示例全球科技股票(QDII)A',
@@ -132,7 +137,8 @@ describe('DataOpsPage purchase-limit coverage', () => {
 
     renderPage()
 
-    await user.selectOptions(await screen.findByLabelText('基金公司'), '80009999')
+    expect(await screen.findByText('请选择至少一个筛选条件')).toBeInTheDocument()
+    await user.selectOptions(await screen.findByLabelText('来源分类'), '311')
     await user.click(await screen.findByRole('checkbox', { name: /示例全球科技股票/ }))
     await user.click(screen.getByRole('button', { name: '导入所选基金' }))
 
@@ -141,5 +147,45 @@ describe('DataOpsPage purchase-limit coverage', () => {
       '/api/fund-catalog/import',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('renders provider status in a dedicated two-column health row', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/funds') return response({ items: [] })
+      if (path === '/api/ingestion-runs') return response({ items: [] })
+      if (path === '/api/data-quality-issues') return response({ items: [] })
+      if (path === '/api/purchase-limit-coverage') return response({
+        total_funds: 0,
+        covered_funds: 0,
+        total_shares: 0,
+        covered_shares: 0,
+        latest_snapshot_date: null,
+        availability_state_counts: {},
+        cap_state_counts: {},
+      })
+      if (path === '/api/provider-health') return response({ items: [{
+        name: 'eastmoney_catalog',
+        enabled: true,
+        priority: 5,
+        status: 'UNKNOWN',
+      }] })
+      if (path === '/api/fund-catalog/options') return response({
+        companies: [],
+        source_categories: [{ value: 'ALL', label: '全部来源分类' }],
+        research_scopes: [{ value: 'ALL', label: '全部 QDII' }],
+        source_provider: 'fixture',
+        source_notice: '公开来源提示',
+      })
+      throw new Error(`unexpected request: ${path}`)
+    }))
+
+    const { container } = renderPage()
+
+    expect(await screen.findByText('eastmoney_catalog')).toBeInTheDocument()
+    expect(screen.getByText('优先级 5')).toBeInTheDocument()
+    expect(screen.getByText('UNKNOWN')).toBeInTheDocument()
+    expect(container.querySelector('.provider-health-row')).toBeInTheDocument()
+    expect(container.querySelector('.provider-health-row.run-row')).not.toBeInTheDocument()
   })
 })

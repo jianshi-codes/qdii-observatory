@@ -27,6 +27,10 @@ class FakeCatalogProvider:
         assert company_code == "80009999"
         return self._snapshot()
 
+    def discover_public(self, source_category: str | None = None) -> FundCatalogSnapshot:
+        assert source_category in (None, "311")
+        return self._snapshot()
+
     def lookup(self, fund_code: str) -> FundCatalogSnapshot:
         assert fund_code == "900001"
         return self._snapshot()
@@ -67,9 +71,14 @@ def test_catalog_api_supports_choices_lookup_and_explicit_import(
         "/api/fund-catalog/candidates",
         params={
             "company_code": "80009999",
+            "source_category": "311",
             "category": "QDII-普通股票",
             "research_scope": "TECHNOLOGY",
         },
+    )
+    source_candidates = client.get(
+        "/api/fund-catalog/candidates",
+        params={"source_category": "311"},
     )
     lookup = client.get("/api/fund-catalog/lookup/900001")
     imported = client.post("/api/fund-catalog/import", json={"fund_codes": ["900001"]})
@@ -78,8 +87,14 @@ def test_catalog_api_supports_choices_lookup_and_explicit_import(
     assert options.json()["companies"] == [
         {"company_code": "80009999", "company_name": "示例基金"}
     ]
+    assert options.json()["source_categories"][1] == {
+        "value": "311",
+        "label": "全球股票",
+    }
     assert candidates.status_code == 200
     assert candidates.json()["items"][0]["research_scope"] == "TECHNOLOGY"
+    assert source_candidates.status_code == 200
+    assert source_candidates.json()["items"][0]["fund_code"] == "900001"
     assert lookup.status_code == 200
     assert lookup.json()["fund_code"] == "900001"
     assert imported.status_code == 200

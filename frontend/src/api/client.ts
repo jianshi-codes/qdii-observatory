@@ -212,8 +212,19 @@ export const api = {
     requestCollection<ProviderHealth>('/api/provider-health', ['providers'], signal),
   fundCatalogOptions: (signal?: AbortSignal) =>
     request<FundCatalogOptions>('/api/fund-catalog/options', signal),
-  fundCatalogCandidates: (companyCode: string, signal?: AbortSignal) => {
-    const query = new URLSearchParams({ company_code: companyCode })
+  fundCatalogCandidates: (filters: {
+    companyCode?: string
+    sourceCategory?: string
+    researchScope?: string
+  }, signal?: AbortSignal) => {
+    const query = new URLSearchParams()
+    if (filters.companyCode) query.set('company_code', filters.companyCode)
+    if (filters.sourceCategory && filters.sourceCategory !== 'ALL') {
+      query.set('source_category', filters.sourceCategory)
+    }
+    if (filters.researchScope && filters.researchScope !== 'ALL') {
+      query.set('research_scope', filters.researchScope)
+    }
     return request<FundCatalogCandidates>(`/api/fund-catalog/candidates?${query}`, signal)
   },
   lookupPublicFund: (fundCode: string, signal?: AbortSignal) =>
