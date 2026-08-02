@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Clock3,
   Database,
+  Download,
   FileWarning,
   Gauge,
   History,
@@ -339,6 +340,8 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
   })
 
   const candidates = useMemo(() => candidatesQuery.data?.items ?? [], [candidatesQuery.data])
+  const allCandidatesSelected = candidates.length > 0
+    && candidates.every((candidate) => selectedCodes.has(candidate.fund_code))
 
   function changeFilter(update: () => void) {
     update()
@@ -352,6 +355,14 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
       else next.add(code)
       return next
     })
+  }
+
+  function toggleAllCandidates() {
+    setSelectedCodes(
+      allCandidatesSelected
+        ? new Set()
+        : new Set(candidates.map((candidate) => candidate.fund_code)),
+    )
   }
 
   function lookupCode() {
@@ -421,7 +432,12 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
               ))}
             </div>
             <div className="catalog-actions">
-              <span>已选择 <strong>{selectedCodes.size}</strong> 个份额代码</span>
+              <div className="catalog-selection-controls">
+                <span>已选择 <strong>{selectedCodes.size}</strong> / {candidates.length} 个份额代码</span>
+                <button className="button button-secondary" type="button" onClick={toggleAllCandidates}>
+                  {allCandidatesSelected ? '取消全选' : `全选当前 ${candidates.length} 个`}
+                </button>
+              </div>
               <button
                 className="button button-primary"
                 type="button"
@@ -467,7 +483,10 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
         <div className="panel catalog-advanced-import">
           <span className="section-kicker">ADVANCED IMPORT</span>
           <h2>批量文件导入</h2>
-          <p>CSV、XLSX、JSON 继续保留给自定义字段、离线目录或大批量迁移，不再是新用户的首要入口。</p>
+          <p>下载 XLSX 模板后，在“基金合同明细”中每行填写一个主基金合同；先校验，再执行导入。</p>
+          <a className="button button-secondary catalog-template-download" href="/templates/universe-import-template.xlsx" download>
+            <Download size={15} />下载 XLSX 模板
+          </a>
           <code>qdii import-universe --file &lt;path&gt;</code>
         </div>
 

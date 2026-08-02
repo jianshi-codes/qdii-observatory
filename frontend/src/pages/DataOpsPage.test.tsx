@@ -111,25 +111,38 @@ describe('DataOpsPage purchase-limit coverage', () => {
         source_notice: '公开来源提示',
       })
       if (path === '/api/fund-catalog/candidates?source_category=311') return response({
-        items: [{
-          fund_code: '900001',
-          fund_name: '示例全球科技股票(QDII)A',
-          manager_code: '80009999',
-          manager_name: '示例基金',
-          category: 'QDII-普通股票',
-          research_scope: 'TECHNOLOGY',
-          currency: 'CNY',
-          wrapper_type: 'DIRECT',
-          source_url: 'https://example.invalid/900001',
-        }],
+        items: [
+          {
+            fund_code: '900001',
+            fund_name: '示例全球科技股票(QDII)A',
+            manager_code: '80009999',
+            manager_name: '示例基金',
+            category: 'QDII-普通股票',
+            research_scope: 'TECHNOLOGY',
+            currency: 'CNY',
+            wrapper_type: 'DIRECT',
+            source_url: 'https://example.invalid/900001',
+          },
+          {
+            fund_code: '900002',
+            fund_name: '示例全球科技股票(QDII)C',
+            manager_code: '80009999',
+            manager_name: '示例基金',
+            category: 'QDII-普通股票',
+            research_scope: 'TECHNOLOGY',
+            currency: 'CNY',
+            wrapper_type: 'DIRECT',
+            source_url: 'https://example.invalid/900002',
+          },
+        ],
         categories: ['QDII-普通股票'],
-        total: 1,
+        total: 2,
         source_provider: 'fixture',
       })
       if (path === '/api/fund-catalog/import') {
         expect(init?.method).toBe('POST')
-        expect(init?.body).toBe(JSON.stringify({ fund_codes: ['900001'] }))
-        return response({ status: 'succeeded', imported_codes: ['900001'], failures: {} })
+        expect(init?.body).toBe(JSON.stringify({ fund_codes: ['900001', '900002'] }))
+        return response({ status: 'succeeded', imported_codes: ['900001', '900002'], failures: {} })
       }
       throw new Error(`unexpected request: ${path}`)
     })
@@ -139,13 +152,22 @@ describe('DataOpsPage purchase-limit coverage', () => {
 
     expect(await screen.findByText('请选择至少一个筛选条件')).toBeInTheDocument()
     await user.selectOptions(await screen.findByLabelText('来源分类'), '311')
-    await user.click(await screen.findByRole('checkbox', { name: /示例全球科技股票/ }))
+    await user.click(await screen.findByRole('button', { name: '全选当前 2 个' }))
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2)
+    for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).toBeChecked()
+    await user.click(screen.getByRole('button', { name: '取消全选' }))
+    for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).not.toBeChecked()
+    await user.click(screen.getByRole('button', { name: '全选当前 2 个' }))
     await user.click(screen.getByRole('button', { name: '导入所选基金' }))
 
     expect(await screen.findByText('导入状态：成功')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/fund-catalog/import',
       expect.objectContaining({ method: 'POST' }),
+    )
+    expect(screen.getByRole('link', { name: '下载 XLSX 模板' })).toHaveAttribute(
+      'href',
+      '/templates/universe-import-template.xlsx',
     )
   })
 

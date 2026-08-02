@@ -2038,6 +2038,7 @@ a.portfolio-fx-source:hover {
 
 .catalog-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -2045,6 +2046,15 @@ a.portfolio-fx-source:hover {
   color: var(--ink-soft);
   font-size: 11px;
 }
+
+.catalog-selection-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.catalog-selection-controls .button { min-height: 32px; }
 
 .catalog-code-field {
   flex-direction: row;
@@ -2070,6 +2080,7 @@ a.portfolio-fx-source:hover {
 
 .catalog-advanced-import h2 { margin: 6px 0; font-size: 17px; }
 .catalog-advanced-import p { margin: 0 0 10px; color: var(--ink-soft); font-size: 10px; line-height: 1.6; }
+.catalog-template-download { width: max-content; margin-bottom: 10px; }
 .catalog-advanced-import > code { display: block; padding: 9px; overflow: auto; color: var(--ink-soft); background: #efede7; border-radius: 7px; font-size: 9px; }
 
 .catalog-import-result {

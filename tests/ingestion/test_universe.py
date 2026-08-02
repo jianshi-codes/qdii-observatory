@@ -7,8 +7,10 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.app.ingestion.ooxml import list_sheets, read_sheet
 from backend.app.ingestion.runs import start_run
 from backend.app.ingestion.universe import (
+    FIELD_ALIASES,
     UniverseValidationError,
     import_universe,
     load_universe,
@@ -40,6 +42,19 @@ def test_sample_universe_is_small_synthetic_and_generic(universe_path: Path) -> 
         item.representative_code in {share.code for share in item.shares}
         for item in universe.contracts
     )
+
+
+def test_downloadable_xlsx_template_matches_import_schema() -> None:
+    template = (
+        Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "public"
+        / "templates"
+        / "universe-import-template.xlsx"
+    )
+
+    assert list_sheets(template) == ["基金合同明细", "填写说明"]
+    assert read_sheet(template, "基金合同明细") == [list(FIELD_ALIASES)]
 
 
 def test_json_universe_supports_one_contract(tmp_path: Path) -> None:
