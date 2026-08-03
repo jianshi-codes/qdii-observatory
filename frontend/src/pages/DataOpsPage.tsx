@@ -18,8 +18,8 @@ import {
   ShieldAlert,
   WalletCards,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type {
@@ -518,9 +518,9 @@ function DataPreparationPanel({
                 <option value="">选择基金…</option>
                 {funds.map((fund) => <option value={fund.representative_code} key={String(fund.id)}>{fund.representative_code} · {fund.canonical_name}</option>)}
               </select>
-              <button className="button button-primary" type="button" disabled={operationBusy || !selectedFundCode} title={preparationActionHelp.prepare} onClick={() => onRun('prepare', [selectedFundCode])}>
+              <PreparationActionButton className="button button-primary" disabled={operationBusy || !selectedFundCode} help={preparationActionHelp.prepare} onClick={() => onRun('prepare', [selectedFundCode])}>
                 <Play size={15} />补齐这一只
-              </button>
+              </PreparationActionButton>
             </div>
           </div>
           <div className="preparation-action-group preparation-batch-action">
@@ -529,21 +529,21 @@ function DataPreparationPanel({
               <small>鼠标停留在按钮上可查看具体范围。</small>
             </div>
             <div className="preparation-actions">
-              <button className="button button-primary" type="button" disabled={operationBusy} title={preparationActionHelp.prepare} onClick={() => onRun('prepare')}>
+              <PreparationActionButton className="button button-primary" disabled={operationBusy} help={preparationActionHelp.prepare} onClick={() => onRun('prepare')}>
                 <Play size={15} />{fullyReady ? `更新全部 ${total} 只基金数据` : `开始准备 ${total} 只基金数据`}
-              </button>
-              <button className="button button-secondary" type="button" disabled={operationBusy} title={preparationActionHelp['sync-daily']} onClick={() => onRun('sync-daily')}>
+              </PreparationActionButton>
+              <PreparationActionButton className="button button-secondary" disabled={operationBusy} help={preparationActionHelp['sync-daily']} onClick={() => onRun('sync-daily')}>
                 同步日常数据
-              </button>
-              <button className="button button-secondary" type="button" disabled={operationBusy} title={preparationActionHelp['sync-sales-limits']} onClick={() => onRun('sync-sales-limits')}>
+              </PreparationActionButton>
+              <PreparationActionButton className="button button-secondary" disabled={operationBusy} help={preparationActionHelp['sync-sales-limits']} onClick={() => onRun('sync-sales-limits')}>
                 仅同步今日限额
-              </button>
-              <button className="button button-secondary" type="button" disabled={operationBusy} title={preparationActionHelp['sync-reports']} onClick={() => onRun('sync-reports')}>
+              </PreparationActionButton>
+              <PreparationActionButton className="button button-secondary" disabled={operationBusy} help={preparationActionHelp['sync-reports']} onClick={() => onRun('sync-reports')}>
                 获取 {status.report_year} Q{status.report_quarter} 报告
-              </button>
-              <button className="button button-secondary" type="button" disabled={operationBusy || status.report_downloaded_funds === 0} title={preparationActionHelp['parse-reports']} onClick={() => onRun('parse-reports')}>
+              </PreparationActionButton>
+              <PreparationActionButton className="button button-secondary" disabled={operationBusy || status.report_downloaded_funds === 0} help={preparationActionHelp['parse-reports']} onClick={() => onRun('parse-reports')}>
                 解析报告并计算穿透
-              </button>
+              </PreparationActionButton>
             </div>
           </div>
         </div>
@@ -580,6 +580,30 @@ function DataPreparationPanel({
         </div>
       )}
     </section>
+  )
+}
+
+function PreparationActionButton({
+  children,
+  className,
+  disabled,
+  help,
+  onClick,
+}: {
+  children: ReactNode
+  className: string
+  disabled: boolean
+  help: string
+  onClick: () => void
+}) {
+  const tooltipId = useId()
+  return (
+    <span className="preparation-action-help" tabIndex={disabled ? 0 : undefined} aria-describedby={disabled ? tooltipId : undefined}>
+      <button className={className} type="button" disabled={disabled} aria-describedby={tooltipId} onClick={onClick}>
+        {children}
+      </button>
+      <span className="preparation-action-tooltip" id={tooltipId} role="tooltip">{help}</span>
+    </span>
   )
 }
 
