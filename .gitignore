@@ -18,4 +18,5 @@ frontend/dist/
 .playwright-cli/
 tmp/
 backups/
+outputs/
 ~$*.xlsx

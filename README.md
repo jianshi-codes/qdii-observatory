@@ -103,7 +103,7 @@ qdii analyze-fund --fund-code 123456 --year 2025 --quarter 4 --export-mode REDAC
 
 ## Portfolio 隐私
 
-Portfolio 默认关闭（`QDII_ENABLE_PORTFOLIO=false`）：不显示导航、不注册写入 CLI 或敏感 API、不读取 portfolio 文件。显式开启后只读取 `.data/private/portfolio.json`，不会自动上传，也不连接真实账户。Evidence 默认 `REDACTED`，且核心分析导出不包含平台名、内部 ID、现金流备注或用户私密字段。详见 [docs/portfolio-privacy.md](docs/portfolio-privacy.md)。
+“我的持仓”入口默认可见，但 Portfolio 数据能力默认关闭（`QDII_ENABLE_PORTFOLIO=false`）：关闭时只显示本地启用说明，不注册写入 CLI 或敏感 API，也不读取持仓数据。显式开启后可下载 XLSX 模板，在页面预览校验后确认导入；文件只发送到本机 API 处理，不会自动上传到第三方，也不连接真实账户。导入涉及的基金会自动加入 active universe，已归档基金会恢复。Evidence 默认 `REDACTED`，且核心分析导出不包含平台名、内部 ID、现金流备注或用户私密字段。详见 [docs/portfolio-privacy.md](docs/portfolio-privacy.md)。
 
 ## 本地开发与检查
 

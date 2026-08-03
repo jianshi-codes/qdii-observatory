@@ -1,18 +1,25 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowUp,
   CalendarClock,
   CircleDollarSign,
+  Download,
+  FileCheck2,
   Landmark,
   ReceiptText,
   RefreshCw,
+  Upload,
   WalletCards,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import type { PortfolioCurrencySummary, PortfolioPosition } from '../api/types'
+import type {
+  PortfolioCurrencySummary,
+  PortfolioImportPositionPreview,
+  PortfolioPosition,
+} from '../api/types'
 import { EmptyPanel, ErrorPanel, LoadingPanel } from '../components/StatePanel'
 import { formatDate, formatPercent, toNumber } from '../lib/format'
 
@@ -67,6 +74,157 @@ function operatingFeeLabel(position: PortfolioPosition): string {
   return `管理 ${management} · 托管 ${custody}`
 }
 
+async function fileBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
+}
+
+function universeAction(item: PortfolioImportPositionPreview): string {
+  if (item.universe_action === 'ADD') return '新增到 universe'
+  if (item.universe_action === 'RESTORE') return '从归档恢复'
+  return '已在 universe'
+}
+
+function PortfolioImportPanel({ templateUrl }: { templateUrl: string }) {
+  const queryClient = useQueryClient()
+  const [file, setFile] = useState<File | null>(null)
+  const [contentBase64, setContentBase64] = useState('')
+  const previewMutation = useMutation({
+    mutationFn: async (selected: File) => {
+      const encoded = await fileBase64(selected)
+      setContentBase64(encoded)
+      return api.previewPortfolioImport(selected.name, encoded)
+    },
+  })
+  const confirmMutation = useMutation({
+    mutationFn: () => {
+      if (!file || !contentBase64 || !previewMutation.data) {
+        throw new Error('请先预览持仓文件')
+      }
+      return api.confirmPortfolioImport(
+        file.name,
+        contentBase64,
+        previewMutation.data.file_digest,
+      )
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+        queryClient.invalidateQueries({ queryKey: ['funds'] }),
+        queryClient.invalidateQueries({ queryKey: ['data-preparation-status'] }),
+      ])
+    },
+  })
+  const preview = previewMutation.data
+
+  return (
+    <section className="panel portfolio-import-panel" aria-labelledby="portfolio-import-title">
+      <div className="panel-heading">
+        <div>
+          <span className="section-kicker">LOCAL IMPORT</span>
+          <h2 id="portfolio-import-title">导入本地持仓</h2>
+          <p>先预览校验，再确认写入。基金会自动加入或恢复到 active universe；缺少净值时确认阶段会先补齐。</p>
+        </div>
+        <a className="button button-secondary" href={templateUrl} download>
+          <Download size={15} />下载 XLSX 模板
+        </a>
+      </div>
+      <div className="portfolio-import-controls">
+        <label className="portfolio-file-picker" htmlFor="portfolio-import-file">
+          <Upload size={17} />
+          <span>{file?.name ?? '选择填写后的 XLSX 文件'}</span>
+          <input
+            id="portfolio-import-file"
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(event) => {
+              const selected = event.target.files?.[0] ?? null
+              setFile(selected)
+              setContentBase64('')
+              previewMutation.reset()
+              confirmMutation.reset()
+            }}
+          />
+        </label>
+        <button
+          className="button button-primary"
+          type="button"
+          disabled={!file || previewMutation.isPending}
+          onClick={() => file && previewMutation.mutate(file)}
+        >
+          <FileCheck2 size={15} />{previewMutation.isPending ? '正在校验…' : '预览并校验'}
+        </button>
+      </div>
+
+      {previewMutation.isError && <ErrorPanel compact error={previewMutation.error} />}
+      {preview && (
+        <div className="portfolio-import-preview">
+          <div className="portfolio-import-summary" aria-label="导入预览摘要">
+            <span>持仓 <strong>{preview.summary.position_count}</strong></span>
+            <span>现金流 <strong>{preview.summary.cash_flow_count}</strong></span>
+            <span>新增 / 更新 <strong>{preview.summary.positions_to_add} / {preview.summary.positions_to_update}</strong></span>
+            <span>universe 新增 / 恢复 <strong>{preview.summary.universe_to_add} / {preview.summary.universe_to_restore}</strong></span>
+            <span>需补净值 <strong>{preview.summary.nav_to_sync}</strong></span>
+          </div>
+          {preview.errors.length > 0 && (
+            <details className="portfolio-import-errors" open>
+              <summary>发现 {preview.errors.length} 个问题，修正后重新预览</summary>
+              <ul>
+                {preview.errors.map((error, index) => (
+                  <li key={`${error.sheet}-${error.row}-${error.code}-${index}`}>
+                    <code>{error.code}</code>
+                    <span>{error.sheet}第 {error.row} 行：{error.message}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {preview.positions.length > 0 && (
+            <div className="data-table-wrap">
+              <table className="data-table portfolio-import-table">
+                <thead><tr><th>基金</th><th>平台 / 快照</th><th>持仓动作</th><th>universe</th><th>净值</th></tr></thead>
+                <tbody>
+                  {preview.positions.map((item) => (
+                    <tr key={`${item.platform}-${item.share_code}`}>
+                      <td><strong>{item.fund_name}</strong><small><code>{item.share_code}</code>{item.manager_name}</small></td>
+                      <td>{item.platform}<small>{formatDate(item.snapshot_date)} · {item.currency}</small></td>
+                      <td>{item.position_action === 'ADD' ? '新增持仓' : '更新持仓'}</td>
+                      <td>{universeAction(item)}</td>
+                      <td>{item.nav_action === 'SYNC' ? '确认时补齐' : '已有锚点'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="portfolio-import-confirm">
+            <span>{preview.valid ? '校验通过；确认后才会写入数据库。' : '当前文件不会写入数据库。'}</span>
+            <button
+              className="button button-primary"
+              type="button"
+              disabled={!preview.valid || confirmMutation.isPending}
+              onClick={() => confirmMutation.mutate()}
+            >
+              {confirmMutation.isPending ? '正在加入基金并写入…' : '确认导入'}
+            </button>
+          </div>
+        </div>
+      )}
+      {confirmMutation.isError && <ErrorPanel compact error={confirmMutation.error} />}
+      {confirmMutation.data && (
+        <div className="portfolio-import-success" role="status">
+          <strong>导入完成</strong>
+          <span>写入 {confirmMutation.data.positions_written} 个持仓、{confirmMutation.data.cash_flows_written} 条现金流；页面已自动刷新。</span>
+        </div>
+      )}
+    </section>
+  )
+}
+
 type SortKey =
   | 'estimated_market_value_cny'
   | 'latest_daily_return_pct'
@@ -103,9 +261,15 @@ export function PortfolioPage() {
     key: null,
     direction: 'desc',
   })
+  const capabilityQuery = useQuery({
+    queryKey: ['portfolio-capability'],
+    queryFn: ({ signal }) => api.portfolioCapability(signal),
+  })
+  const portfolioEnabled = capabilityQuery.data?.enabled === true
   const portfolioQuery = useQuery({
     queryKey: ['portfolio'],
     queryFn: ({ signal }) => api.portfolio(signal),
+    enabled: portfolioEnabled,
   })
   const portfolio = portfolioQuery.data
   const positions = useMemo(() => portfolio?.positions ?? [], [portfolio])
@@ -151,10 +315,20 @@ export function PortfolioPage() {
         </div>
       </section>
 
-      {portfolioQuery.isPending && <LoadingPanel label="正在读取本地持仓…" />}
+      {capabilityQuery.isPending && <LoadingPanel label="正在确认本地持仓能力…" />}
+      {capabilityQuery.isError && <ErrorPanel error={capabilityQuery.error} onRetry={() => capabilityQuery.refetch()} />}
+      {capabilityQuery.isSuccess && !portfolioEnabled && (
+        <EmptyPanel title="本地持仓尚未启用" detail="入口会保持可见；在本机 .env 设置 QDII_ENABLE_PORTFOLIO=true 并重启后即可导入，项目不会连接真实账户。" />
+      )}
+      {portfolioEnabled && (
+        <PortfolioImportPanel
+          templateUrl={capabilityQuery.data?.template_url ?? '/templates/portfolio-import-template.xlsx'}
+        />
+      )}
+      {portfolioEnabled && portfolioQuery.isPending && <LoadingPanel label="正在读取本地持仓…" />}
       {portfolioQuery.isError && <ErrorPanel error={portfolioQuery.error} onRetry={() => portfolioQuery.refetch()} />}
       {portfolioQuery.isSuccess && positions.length === 0 && (
-        <EmptyPanel title="尚未导入本地 Portfolio" detail="把本地 JSON 放到 .data/private/portfolio.json 后运行 qdii import-portfolio。" />
+        <EmptyPanel title="尚未导入本地持仓" detail="下载模板并填写后，在上方预览校验；只有点击“确认导入”才会写入本地数据库。" />
       )}
 
       {portfolioQuery.isSuccess && positions.length > 0 && (

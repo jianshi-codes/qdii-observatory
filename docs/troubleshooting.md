@@ -9,4 +9,5 @@
 - 基金公司没有候选：该公开公司页可能没有 QDII，先换公司或用六位代码精确查询；不要把普通基金自动归入 QDII。
 - Provider `SCHEMA_CHANGED`：保留原始 artifact 和错误，不提高 retry 掩盖 schema 变化；用最小 fixture 修 parser。
 - 外部 bind mount 被拒绝：目录必须预先存在、可写、有足够容量，且路径需显式配置。
-- Portfolio 不显示：这是默认行为；只在理解隐私边界后设置 `QDII_ENABLE_PORTFOLIO=true` 并重建前端。
+- “我的持仓”入口可见但提示未启用：这是默认行为；只在理解隐私边界后设置 `QDII_ENABLE_PORTFOLIO=true`，并重启 backend 和 worker。入口不再依赖前端构建开关。
+- Portfolio XLSX 预览失败：按页面中的工作表、行号和错误码修正模板后重新预览；预览不会写数据库。只有“确认导入”会加入/恢复 universe、按需补净值并写入持仓。

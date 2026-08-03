@@ -360,6 +360,58 @@ export interface PortfolioPayload {
   } | null
 }
 
+export interface PortfolioCapability {
+  enabled: boolean
+  template_url: string
+}
+
+export interface PortfolioImportError {
+  sheet: string
+  row: number
+  code: string
+  message: string
+}
+
+export interface PortfolioImportPositionPreview {
+  source_row: number
+  share_code: string
+  fund_name: string
+  manager_name: string | null
+  platform: string
+  snapshot_date: string
+  currency: string
+  market_value: number | string
+  holding_profit: number | string
+  holding_return_pct: number | string
+  position_action: 'ADD' | 'UPDATE'
+  universe_action: 'ADD' | 'RESTORE' | 'KEEP'
+  nav_action: 'SYNC' | 'KEEP'
+}
+
+export interface PortfolioImportPreview {
+  file_digest: string
+  valid: boolean
+  positions: PortfolioImportPositionPreview[]
+  errors: PortfolioImportError[]
+  summary: {
+    position_count: number
+    cash_flow_count: number
+    positions_to_add: number
+    positions_to_update: number
+    universe_to_add: number
+    universe_to_restore: number
+    nav_to_sync: number
+  }
+}
+
+export interface PortfolioImportResult {
+  positions_written: number
+  cash_flows_written: number
+  universe_added: string[]
+  universe_restored: string[]
+  nav_synced: string[]
+}
+
 export interface FundRelation {
   id?: Identifier
   relation_type: string

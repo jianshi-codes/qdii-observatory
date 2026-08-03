@@ -16,6 +16,9 @@ import type {
   FundUniverseState,
   IngestionRun,
   NavPoint,
+  PortfolioCapability,
+  PortfolioImportPreview,
+  PortfolioImportResult,
   PortfolioPayload,
   PurchaseLimit,
   PurchaseLimitChannelType,
@@ -145,7 +148,28 @@ async function requestExposure(
 }
 
 export const api = {
+  portfolioCapability: (signal?: AbortSignal) =>
+    request<PortfolioCapability>('/api/portfolio/capability', signal),
   portfolio: (signal?: AbortSignal) => request<PortfolioPayload>('/api/portfolio', signal),
+  previewPortfolioImport: (
+    filename: string,
+    contentBase64: string,
+    signal?: AbortSignal,
+  ) => request<PortfolioImportPreview>('/api/portfolio/import/preview', signal, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, content_base64: contentBase64 }),
+  }),
+  confirmPortfolioImport: (
+    filename: string,
+    contentBase64: string,
+    fileDigest: string,
+    signal?: AbortSignal,
+  ) => request<PortfolioImportResult>('/api/portfolio/import/confirm', signal, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, content_base64: contentBase64, file_digest: fileDigest }),
+  }),
   funds: (signal?: AbortSignal) =>
     requestCollection<FundSummary>('/api/funds', ['funds'], signal),
   archiveFund: (id: string, signal?: AbortSignal) =>

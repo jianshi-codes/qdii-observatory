@@ -6,8 +6,6 @@ RUN corepack enable
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
-ARG VITE_QDII_ENABLE_PORTFOLIO=false
-ENV VITE_QDII_ENABLE_PORTFOLIO=$VITE_QDII_ENABLE_PORTFOLIO
 RUN pnpm build
 
 FROM nginx:1.27-alpine

@@ -11,11 +11,9 @@ import {
 import { useState, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 
-const portfolioEnabled = import.meta.env.VITE_QDII_ENABLE_PORTFOLIO === 'true'
-
 const navigation = [
   { to: '/', label: '基金总览', icon: BarChart3, end: true },
-  ...(portfolioEnabled ? [{ to: '/portfolio', label: '本地 Portfolio', icon: WalletCards }] : []),
+  { to: '/portfolio', label: '我的持仓', icon: WalletCards },
   { to: '/compare', label: '基金对比', icon: Scale },
   { to: '/ops', label: '数据运维', icon: DatabaseZap },
 ]

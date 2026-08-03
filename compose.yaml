@@ -62,8 +62,6 @@ services:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
-      args:
-        VITE_QDII_ENABLE_PORTFOLIO: ${QDII_ENABLE_PORTFOLIO:-false}
     restart: unless-stopped
     depends_on:
       backend:

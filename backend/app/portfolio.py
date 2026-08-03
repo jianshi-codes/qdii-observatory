@@ -27,6 +27,13 @@ class PortfolioImportResult:
 
 def import_portfolio(session: Session, path: Path) -> PortfolioImportResult:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    return import_portfolio_payload(session, payload)
+
+
+def import_portfolio_payload(
+    session: Session,
+    payload: object,
+) -> PortfolioImportResult:
     if not isinstance(payload, dict) or not isinstance(payload.get("positions"), list):
         raise ValueError("Portfolio JSON must contain a positions array")
     positions = payload["positions"]
@@ -106,40 +113,44 @@ def import_portfolio(session: Session, path: Path) -> PortfolioImportResult:
         row.is_active = bool(raw.get("active", True))
         session.flush()
 
-        cash_flows = raw.get("cash_flows", [])
-        if not isinstance(cash_flows, list):
-            raise ValueError("cash_flows must be an array")
-        row.cash_flows.clear()
-        for flow_index, flow in enumerate(cash_flows):
-            if not isinstance(flow, dict):
-                raise ValueError(f"cash_flows[{flow_index}] must be an object")
-            occurred_on = (
-                _date_value(flow["occurred_on"], "occurred_on") if flow.get("occurred_on") else None
-            )
-            occurred_year = int(
-                flow.get("occurred_year") or (occurred_on.year if occurred_on else 0)
-            )
-            if not 2000 <= occurred_year <= 2100:
-                raise ValueError("cash flow requires occurred_on or a valid occurred_year")
-            flow_currency = str(flow.get("currency") or currency).strip().upper()
-            if flow_currency != currency:
-                raise ValueError("cash flow currency must match the portfolio position")
-            row.cash_flows.append(
-                PortfolioCashFlow(
-                    flow_type="DIVIDEND",
-                    occurred_on=occurred_on,
-                    occurred_year=occurred_year,
-                    amount=_decimal(flow.get("amount"), "cash flow amount", positive=True),
-                    currency=flow_currency,
-                    source_type="USER_REPORTED",
-                    note=_optional_text(flow.get("note")),
+        cash_flows = raw.get("cash_flows")
+        if cash_flows is not None:
+            if not isinstance(cash_flows, list):
+                raise ValueError("cash_flows must be an array")
+            row.cash_flows.clear()
+            for flow_index, flow in enumerate(cash_flows):
+                if not isinstance(flow, dict):
+                    raise ValueError(f"cash_flows[{flow_index}] must be an object")
+                occurred_on = (
+                    _date_value(flow["occurred_on"], "occurred_on")
+                    if flow.get("occurred_on")
+                    else None
                 )
-            )
-            cash_flows_written += 1
+                occurred_year = int(
+                    flow.get("occurred_year") or (occurred_on.year if occurred_on else 0)
+                )
+                if not 2000 <= occurred_year <= 2100:
+                    raise ValueError("cash flow requires occurred_on or a valid occurred_year")
+                flow_currency = str(flow.get("currency") or currency).strip().upper()
+                if flow_currency != currency:
+                    raise ValueError("cash flow currency must match the portfolio position")
+                row.cash_flows.append(
+                    PortfolioCashFlow(
+                        flow_type="DIVIDEND",
+                        occurred_on=occurred_on,
+                        occurred_year=occurred_year,
+                        amount=_decimal(flow.get("amount"), "cash flow amount", positive=True),
+                        currency=flow_currency,
+                        source_type="USER_REPORTED",
+                        note=_optional_text(flow.get("note")),
+                    )
+                )
+                cash_flows_written += 1
 
-        note = _quality_note(market_value, profit, return_pct, bool(cash_flows))
+        has_cash_flows = bool(row.cash_flows)
+        note = _quality_note(market_value, profit, return_pct, has_cash_flows)
         row.data_quality_note = note
-        if note and not cash_flows:
+        if note and not has_cash_flows:
             record_issue(
                 session,
                 fund_contract_id=share.fund_contract_id,
@@ -230,6 +241,8 @@ def _optional_text(value: object) -> str | None:
 
 
 def _date_value(value: object, field: str) -> date:
+    if isinstance(value, date):
+        return value
     if not isinstance(value, str):
         raise ValueError(f"{field} must be YYYY-MM-DD")
     try:

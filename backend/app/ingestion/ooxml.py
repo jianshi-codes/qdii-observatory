@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import zipfile
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 from xml.etree import ElementTree as ET
 
 MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -78,14 +79,17 @@ def _cell_text(cell: ET.Element, shared: list[str]) -> str:
     return value.text
 
 
-def list_sheets(path: Path) -> list[str]:
+type WorkbookSource = Path | BinaryIO
+
+
+def list_sheets(path: WorkbookSource) -> list[str]:
     """Return worksheet names in workbook order."""
 
     with zipfile.ZipFile(path) as archive:
         return list(_sheet_paths(archive))
 
 
-def read_sheet(path: Path, sheet_name: str) -> list[list[str]]:
+def read_sheet(path: WorkbookSource, sheet_name: str) -> list[list[str]]:
     """Read a worksheet as rows of text while retaining identifier digits."""
 
     with zipfile.ZipFile(path) as archive:

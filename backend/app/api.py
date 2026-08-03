@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from collections import Counter, defaultdict
 from collections.abc import Generator
 from dataclasses import asdict
@@ -16,6 +18,7 @@ from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from backend.app.config import get_settings
 from backend.app.coverage import lookthrough_status, report_row_counts
 from backend.app.data_operations import (
     NoSelectedFundsError,
@@ -27,13 +30,19 @@ from backend.app.data_operations import (
 from backend.app.database import get_db
 from backend.app.ingestion.catalog_pipeline import import_public_funds
 from backend.app.ingestion.http import ProviderHttpClient, ProviderHttpError, RetryPolicy
-from backend.app.ingestion.provider_registry import load_provider_registry, provider_status
+from backend.app.ingestion.nav_pipeline import sync_nav
+from backend.app.ingestion.provider_registry import (
+    load_provider_registry,
+    provider_client,
+    provider_status,
+)
 from backend.app.ingestion.providers.base import FundCatalogProvider, ProviderSchemaError
 from backend.app.ingestion.providers.catalog import (
     RESEARCH_SCOPES,
     SOURCE_CATEGORIES,
     EastmoneyFundCatalogProvider,
 )
+from backend.app.ingestion.providers.nav import EastmoneyNavProvider
 from backend.app.ingestion.storage import StoragePreflightError, raw_data_dir
 from backend.app.models import (
     DailyExchangePrice,
@@ -61,6 +70,13 @@ from backend.app.operation_queue import (
     OperationInProgressError,
     enqueue_operation,
     latest_operation,
+)
+from backend.app.portfolio import import_portfolio_payload
+from backend.app.portfolio_import import (
+    anchor_missing_codes,
+    build_portfolio_preview,
+    nav_sync_range,
+    parse_portfolio_workbook,
 )
 from backend.app.q2_analysis import ANALYSIS_START_DATE, MODEL_NAME
 from backend.app.q2_analysis.consistency import ConsistencyRules, evaluate_consistency
@@ -104,10 +120,15 @@ from backend.app.schemas import (
     NavHistoryRead,
     NavPointRead,
     OverlapSecurityRead,
+    PortfolioCapabilityRead,
     PortfolioCashFlowRead,
     PortfolioConvertedSummaryRead,
     PortfolioCurrencySummaryRead,
     PortfolioFeeRead,
+    PortfolioImportConfirmRequest,
+    PortfolioImportFileRequest,
+    PortfolioImportPreviewRead,
+    PortfolioImportResultRead,
     PortfolioPositionRead,
     PortfolioRead,
     PortfolioRecurringPlanRead,
@@ -1009,6 +1030,135 @@ def get_provider_health(db: DbSession) -> dict[str, object]:
             }
         )
     return {"providers": providers}
+
+
+@router.get("/portfolio/capability", response_model=PortfolioCapabilityRead)
+def get_portfolio_capability() -> PortfolioCapabilityRead:
+    return PortfolioCapabilityRead(
+        enabled=get_settings().portfolio_enabled,
+        template_url="/templates/portfolio-import-template.xlsx",
+    )
+
+
+def _decode_portfolio_file(request: PortfolioImportFileRequest) -> bytes:
+    if not request.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=422, detail="只支持 .xlsx 持仓模板")
+    try:
+        return base64.b64decode(request.content_base64, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise HTTPException(status_code=422, detail="上传文件不是有效的 Base64 内容") from error
+
+
+@portfolio_router.post(
+    "/portfolio/import/preview",
+    response_model=PortfolioImportPreviewRead,
+)
+def preview_portfolio_import(
+    request: PortfolioImportFileRequest,
+    db: DbSession,
+    provider: CatalogProvider,
+) -> PortfolioImportPreviewRead:
+    try:
+        workbook = parse_portfolio_workbook(_decode_portfolio_file(request))
+        preview = build_portfolio_preview(db, workbook, provider)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ProviderSchemaError, ProviderHttpError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return PortfolioImportPreviewRead.model_validate(preview)
+
+
+@portfolio_router.post(
+    "/portfolio/import/confirm",
+    response_model=PortfolioImportResultRead,
+)
+def confirm_portfolio_import(
+    request: PortfolioImportConfirmRequest,
+    db: DbSession,
+    provider: CatalogProvider,
+) -> PortfolioImportResultRead:
+    try:
+        workbook = parse_portfolio_workbook(_decode_portfolio_file(request))
+        preview = build_portfolio_preview(db, workbook, provider)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ProviderSchemaError, ProviderHttpError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if workbook.file_digest != request.file_digest:
+        raise HTTPException(status_code=409, detail="文件已变化，请重新预览后再确认")
+    if not preview["valid"]:
+        raise HTTPException(status_code=422, detail="文件校验未通过，请修正后重新预览")
+
+    try:
+        raw_root = raw_data_dir()
+    except StoragePreflightError as error:
+        raise HTTPException(status_code=503, detail=f"本地数据目录不可用：{error}") from error
+
+    positions = preview["positions"]
+    add_codes = tuple(
+        sorted({item["share_code"] for item in positions if item["universe_action"] == "ADD"})
+    )
+    restore_codes = sorted(
+        {item["share_code"] for item in positions if item["universe_action"] == "RESTORE"}
+    )
+    imported_codes: list[str] = []
+    if add_codes:
+        public_result = import_public_funds(db, provider, raw_root, add_codes)
+        if public_result.failures:
+            failures = "；".join(
+                f"{code}: {message}" for code, message in public_result.failures.items()
+            )
+            raise HTTPException(status_code=502, detail=f"加入基金 universe 失败：{failures}")
+        imported_codes = list(public_result.imported_codes)
+
+    for raw in workbook.payload["positions"]:
+        share = db.scalar(
+            select(FundShare).where(FundShare.share_code == str(raw["share_code"]))
+        )
+        if share is None:
+            raise HTTPException(
+                status_code=502,
+                detail=f"基金 {raw['share_code']} 加入 universe 后仍不存在",
+            )
+        share.fund_contract.is_user_selected = True
+        share.fund_contract.is_dependency = False
+    db.commit()
+
+    missing_nav = anchor_missing_codes(db, workbook)
+    if missing_nav:
+        start_date, end_date = nav_sync_range(workbook)
+        try:
+            with provider_client("eastmoney_nav") as http:
+                sync_nav(
+                    db,
+                    EastmoneyNavProvider(http),
+                    raw_root,
+                    start_date=start_date,
+                    end_date=end_date,
+                    share_codes=missing_nav,
+                    page_size=1000,
+                )
+        except Exception as error:
+            raise HTTPException(status_code=502, detail=f"补充基金净值失败：{error}") from error
+        still_missing = anchor_missing_codes(db, workbook)
+        if still_missing:
+            raise HTTPException(
+                status_code=422,
+                detail=f"这些基金在快照日期前没有可用净值：{sorted(still_missing)}",
+            )
+
+    try:
+        result = import_portfolio_payload(db, workbook.payload)
+    except ValueError as error:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"写入持仓失败：{error}") from error
+    return PortfolioImportResultRead(
+        positions_written=result.positions_written,
+        cash_flows_written=result.cash_flows_written,
+        universe_added=sorted(imported_codes),
+        universe_restored=restore_codes,
+        nav_synced=sorted(missing_nav),
+    )
 
 
 @portfolio_router.get("/portfolio", response_model=PortfolioRead)

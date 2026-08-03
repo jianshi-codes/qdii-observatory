@@ -8,7 +8,6 @@ const ComparePage = lazy(() => import('./pages/ComparePage').then((module) => ({
 const DataOpsPage = lazy(() => import('./pages/DataOpsPage').then((module) => ({ default: module.DataOpsPage })))
 const FundDetailPage = lazy(() => import('./pages/FundDetailPage').then((module) => ({ default: module.FundDetailPage })))
 const PortfolioPage = lazy(() => import('./pages/PortfolioPage').then((module) => ({ default: module.PortfolioPage })))
-const portfolioEnabled = import.meta.env.VITE_QDII_ENABLE_PORTFOLIO === 'true'
 
 export function App() {
   return (
@@ -18,7 +17,7 @@ export function App() {
           <Route path="/" element={<FundOverviewPage />} />
           <Route path="/funds/:fundId" element={<FundDetailPage />} />
           <Route path="/compare" element={<ComparePage />} />
-          {portfolioEnabled && <Route path="/portfolio" element={<PortfolioPage />} />}
+          <Route path="/portfolio" element={<PortfolioPage />} />
           <Route path="/ops" element={<DataOpsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

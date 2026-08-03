@@ -14,7 +14,7 @@ from backend.app.models import (
     PortfolioCashFlow,
     PortfolioPosition,
 )
-from backend.app.portfolio import import_portfolio
+from backend.app.portfolio import import_portfolio, import_portfolio_payload
 
 
 def test_import_portfolio_anchors_nav_and_preserves_dividend_aware_platform_values(
@@ -90,3 +90,22 @@ def test_import_portfolio_anchors_nav_and_preserves_dividend_aware_platform_valu
         (date(2024, 1, 18), 2024, Decimal("100.000000")),
         (None, 2025, Decimal("200.000000")),
     ]
+
+    import_portfolio_payload(
+        db_session,
+        {
+            "positions": [
+                {
+                    "share_code": "123456",
+                    "platform": "测试平台",
+                    "snapshot_date": "2026-08-01",
+                    "market_value": "11000.00",
+                    "holding_profit": "600.00",
+                    "holding_return_pct": "5.77",
+                }
+            ]
+        },
+    )
+
+    preserved_flows = list(db_session.scalars(select(PortfolioCashFlow)))
+    assert len(preserved_flows) == 2

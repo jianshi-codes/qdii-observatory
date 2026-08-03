@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PortfolioPage } from './PortfolioPage'
 
 function response(body: unknown) {
@@ -22,9 +22,17 @@ function renderPage() {
 
 describe('PortfolioPage', () => {
   beforeEach(() => vi.restoreAllMocks())
+  afterEach(cleanup)
 
   it('shows currency-separated valuation, dividends, recurring investment, and fees', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => response({
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      if (String(input).includes('/api/portfolio/capability')) {
+        return response({
+          enabled: true,
+          template_url: '/templates/portfolio-import-template.xlsx',
+        })
+      }
+      return response({
       latest_nav_date: '2026-07-30',
       currency_summaries: [
         {
@@ -143,7 +151,8 @@ describe('PortfolioPage', () => {
         source_provider: 'ECB_REFERENCE_RATE',
         source_url: 'https://example.test/fx',
       },
-    })))
+      })
+    }))
 
     renderPage()
 
@@ -163,5 +172,99 @@ describe('PortfolioPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /参考市值/ }))
     expect(screen.getAllByRole('row')[1]).toHaveTextContent('测试全球基金')
     expect(screen.getByText(/不会自动记为已成交/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /下载 XLSX 模板/ })).toHaveAttribute(
+      'href',
+      '/templates/portfolio-import-template.xlsx',
+    )
+  })
+
+  it('previews, confirms, and refreshes the portfolio after import', async () => {
+    let portfolioRequests = 0
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/api/portfolio/capability')) {
+        return response({
+          enabled: true,
+          template_url: '/templates/portfolio-import-template.xlsx',
+        })
+      }
+      if (url.includes('/api/portfolio/import/preview')) {
+        return response({
+          file_digest: 'a'.repeat(64),
+          valid: true,
+          positions: [{
+            source_row: 5,
+            share_code: '006373',
+            fund_name: '国富全球科技互联混合(QDII)人民币A',
+            manager_name: '国海富兰克林基金',
+            platform: '测试平台',
+            snapshot_date: '2026-08-01',
+            currency: 'CNY',
+            market_value: '10000',
+            holding_profit: '500',
+            holding_return_pct: '5',
+            position_action: 'ADD',
+            universe_action: 'RESTORE',
+            nav_action: 'KEEP',
+          }],
+          errors: [],
+          summary: {
+            position_count: 1,
+            cash_flow_count: 0,
+            positions_to_add: 1,
+            positions_to_update: 0,
+            universe_to_add: 0,
+            universe_to_restore: 1,
+            nav_to_sync: 0,
+          },
+        })
+      }
+      if (url.includes('/api/portfolio/import/confirm')) {
+        return response({
+          positions_written: 1,
+          cash_flows_written: 0,
+          universe_added: [],
+          universe_restored: ['006373'],
+          nav_synced: [],
+        })
+      }
+      if (url.endsWith('/api/portfolio')) {
+        portfolioRequests += 1
+        return response({
+          latest_nav_date: null,
+          positions: [],
+          currency_summaries: [],
+          converted_summary: null,
+        })
+      }
+      return response([])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+    await screen.findByText('尚未导入本地持仓')
+
+    const file = new File([new Uint8Array([1, 2, 3])], 'portfolio.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    Object.defineProperty(file, 'arrayBuffer', {
+      value: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
+    })
+    fireEvent.change(screen.getByLabelText('选择填写后的 XLSX 文件'), {
+      target: { files: [file] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /预览并校验/ }))
+
+    expect(await screen.findByText('从归档恢复')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认导入' }))
+
+    expect(await screen.findByText('导入完成')).toBeInTheDocument()
+    await waitFor(() => expect(portfolioRequests).toBeGreaterThanOrEqual(2))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/portfolio/import/confirm',
+      expect.objectContaining({
+        body: expect.stringContaining(`"file_digest":"${'a'.repeat(64)}"`),
+      }),
+    )
   })
 })

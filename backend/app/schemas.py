@@ -145,6 +145,69 @@ class PortfolioRead(ApiModel):
     converted_summary: PortfolioConvertedSummaryRead | None
 
 
+class PortfolioCapabilityRead(ApiModel):
+    enabled: bool
+    template_url: str
+
+
+class PortfolioImportFileRequest(ApiModel):
+    filename: str = Field(min_length=1, max_length=200)
+    content_base64: str = Field(min_length=1)
+
+
+class PortfolioImportConfirmRequest(PortfolioImportFileRequest):
+    file_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class PortfolioImportErrorRead(ApiModel):
+    sheet: str
+    row: int
+    code: str
+    message: str
+
+
+class PortfolioImportPositionPreviewRead(ApiModel):
+    source_row: int
+    share_code: str
+    fund_name: str
+    manager_name: str | None
+    platform: str
+    snapshot_date: date
+    currency: str
+    market_value: Decimal
+    holding_profit: Decimal
+    holding_return_pct: Decimal
+    position_action: Literal["ADD", "UPDATE"]
+    universe_action: Literal["ADD", "RESTORE", "KEEP"]
+    nav_action: Literal["SYNC", "KEEP"]
+
+
+class PortfolioImportSummaryRead(ApiModel):
+    position_count: int
+    cash_flow_count: int
+    positions_to_add: int
+    positions_to_update: int
+    universe_to_add: int
+    universe_to_restore: int
+    nav_to_sync: int
+
+
+class PortfolioImportPreviewRead(ApiModel):
+    file_digest: str
+    valid: bool
+    positions: list[PortfolioImportPositionPreviewRead]
+    errors: list[PortfolioImportErrorRead]
+    summary: PortfolioImportSummaryRead
+
+
+class PortfolioImportResultRead(ApiModel):
+    positions_written: int
+    cash_flows_written: int
+    universe_added: list[str]
+    universe_restored: list[str]
+    nav_synced: list[str]
+
+
 class FundSummaryRead(ApiModel):
     id: int
     canonical_name: str
