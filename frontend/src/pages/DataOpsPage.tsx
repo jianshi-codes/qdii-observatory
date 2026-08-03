@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   AlertCircle,
+  Archive,
   CheckCircle2,
   CircleDashed,
   Clock3,
@@ -174,6 +175,10 @@ export function DataOpsPage() {
     }) => api.runDataOperation(operation, fundCodes),
     onSuccess: () => refreshAll(),
   })
+  const archiveMutation = useMutation({
+    mutationFn: (fund: FundSummary) => api.archiveFund(String(fund.id)),
+    onSuccess: () => refreshAll(),
+  })
 
   const funds = fundsQuery.data ?? []
   const persistedOperation = preparationQuery.data?.latest_operation
@@ -201,7 +206,7 @@ export function DataOpsPage() {
   const lastRun = runs[0]
   const anyPending = fundsQuery.isPending || runsQuery.isPending || issuesQuery.isPending
     || limitCoverageQuery.isPending || providerHealthQuery.isPending || preparationQuery.isPending
-    || operationMutation.isPending
+    || operationMutation.isPending || archiveMutation.isPending
 
   const refreshAll = useCallback(() => {
     void Promise.all([
@@ -228,6 +233,13 @@ export function DataOpsPage() {
 
   function runOperation(operation: DataOperationName, fundCodes: string[] = []) {
     operationMutation.mutate({ operation, fundCodes })
+  }
+
+  function archiveFund(fund: FundSummary) {
+    const confirmed = window.confirm(
+      `确认归档“${fund.canonical_name}”？\n\n历史净值、报告和限额不会删除，但该基金将退出当前 universe 并停止后续同步。再次从公开信息导入时会恢复原记录。`,
+    )
+    if (confirmed) archiveMutation.mutate(fund)
   }
 
   return (
@@ -390,7 +402,8 @@ export function DataOpsPage() {
         </div>
         {fundsQuery.isPending && <LoadingPanel label="载入覆盖清单…" />}
         {fundsQuery.isError && <ErrorPanel error={fundsQuery.error} onRetry={() => fundsQuery.refetch()} />}
-        {fundsQuery.isSuccess && funds.length === 0 && <EmptyPanel title="覆盖清单为空" detail="请先从公开信息选择基金、输入基金代码，或使用高级批量模板导入。" />}
+        {fundsQuery.isSuccess && funds.length === 0 && <EmptyPanel title="当前 universe 没有活跃基金" detail="请从公开信息重新导入基金；已归档基金会恢复原有历史数据，不会重复创建。" />}
+        {archiveMutation.isError && <p className="archive-error" role="alert">归档失败：{archiveMutation.error instanceof Error ? archiveMutation.error.message : '未知错误'}</p>}
         {fundsQuery.isSuccess && funds.length > 0 && (
           <div className="data-table-wrap">
             <table className="data-table coverage-table">
@@ -405,14 +418,17 @@ export function DataOpsPage() {
                   <td><StatusBadge value={field(fund, 'lookthrough_status')} label={lookthroughStatusLabel(field(fund, 'lookthrough_status'))} /></td>
                   <td>{formatDate(field(fund, 'latest_nav_date'))}</td>
                   <td>
-                    <PreparationActionButton
-                      className="button button-quiet"
-                      disabled={operationBusy}
-                      help={preparationActionHelp.prepare}
-                      onClick={() => runOperation('prepare', [fund.representative_code])}
-                    >
-                      <Play size={14} />补齐数据
-                    </PreparationActionButton>
+                    <div className="coverage-actions">
+                      <PreparationActionButton
+                        className="button button-quiet"
+                        disabled={operationBusy || archiveMutation.isPending}
+                        help={preparationActionHelp.prepare}
+                        onClick={() => runOperation('prepare', [fund.representative_code])}
+                      >
+                        <Play size={14} />补齐数据
+                      </PreparationActionButton>
+                      <button className="button button-quiet" type="button" disabled={operationBusy || archiveMutation.isPending} aria-label={`归档 ${fund.canonical_name}`} onClick={() => archiveFund(fund)}><Archive size={14} />归档</button>
+                    </div>
                   </td>
                 </tr>
               ))}</tbody>

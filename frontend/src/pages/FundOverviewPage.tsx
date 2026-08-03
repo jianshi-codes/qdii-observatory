@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
+  Archive,
   ArrowDown,
   ArrowRight,
   ArrowUp,
@@ -174,6 +175,13 @@ export function FundOverviewPage() {
     queryKey: ['funds'],
     queryFn: ({ signal }) => api.funds(signal),
   })
+  const archiveMutation = useMutation({
+    mutationFn: (fund: FundSummary) => api.archiveFund(fundId(fund)),
+    onSuccess: (_, fund) => {
+      setSelected((current) => current.filter((item) => item !== fundId(fund)))
+      void fundsQuery.refetch()
+    },
+  })
 
   const funds = useMemo(() => fundsQuery.data ?? [], [fundsQuery.data])
   const managers = useMemo(
@@ -244,6 +252,13 @@ export function FundOverviewPage() {
     navigate(`/compare?ids=${selected.map(encodeURIComponent).join(',')}`)
   }
 
+  function archiveFund(fund: FundSummary) {
+    const confirmed = window.confirm(
+      `确认归档“${fund.canonical_name}”？\n\n历史净值、报告和限额不会删除，但该基金将退出当前 universe 并停止后续同步。再次从公开信息导入时会恢复原记录。`,
+    )
+    if (confirmed) archiveMutation.mutate(fund)
+  }
+
   const visible = (key: ColumnKey) => visibleColumns.has(key)
 
   return (
@@ -309,7 +324,8 @@ export function FundOverviewPage() {
 
         {fundsQuery.isPending && <LoadingPanel label="正在载入基金 universe…" />}
         {fundsQuery.isError && <ErrorPanel error={fundsQuery.error} onRetry={() => fundsQuery.refetch()} />}
-        {fundsQuery.isSuccess && funds.length === 0 && <EmptyPanel title="基金 universe 尚未导入" detail="请到数据运维页从公开信息选择基金或输入六位代码；观察台不会使用演示基金替代真实结果。" />}
+        {fundsQuery.isSuccess && funds.length === 0 && <EmptyPanel title="当前 universe 没有活跃基金" detail="请到数据运维页从公开信息选择基金或输入六位代码；重新导入已归档基金会恢复原有历史数据。" />}
+        {archiveMutation.isError && <p className="archive-error" role="alert">归档失败：{archiveMutation.error instanceof Error ? archiveMutation.error.message : '未知错误'}</p>}
         {fundsQuery.isSuccess && funds.length > 0 && filteredFunds.length === 0 && <EmptyPanel title="没有匹配的基金" detail="调整搜索词或筛选条件后再试。" compact />}
         {fundsQuery.isSuccess && filteredFunds.length > 0 && (
           <div className="data-table-wrap">
@@ -333,7 +349,7 @@ export function FundOverviewPage() {
                   {visible('distribution_purchase_limit') && <SortableHeader columnKey="distribution_purchase_limit" label="代销限额" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('latest_report_status') && <th>Q2 报告</th>}
                   {visible('latest_nav_date') && <th>最新净值日期</th>}
-                  <th><span className="sr-only">打开详情</span></th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -360,7 +376,12 @@ export function FundOverviewPage() {
                       {visible('distribution_purchase_limit') && <td><LimitCell limit={fund.distribution_purchase_limit} /></td>}
                       {visible('latest_report_status') && <td><StatusBadge value={field(fund, 'latest_report_status', 'report_status', 'q2_report_status')} /></td>}
                       {visible('latest_nav_date') && <td><span className="date-cell">{formatDate(field(fund, 'latest_nav_date'))}</span></td>}
-                      <td><Link className="icon-link" to={`/funds/${encodeURIComponent(id)}`} aria-label={`查看 ${fund.canonical_name} 详情`}><ArrowRight size={17} /></Link></td>
+                      <td>
+                        <div className="fund-row-actions">
+                          <button className="button button-quiet" type="button" disabled={archiveMutation.isPending} aria-label={`归档 ${fund.canonical_name}`} onClick={() => archiveFund(fund)}><Archive size={14} />归档</button>
+                          <Link className="icon-link" to={`/funds/${encodeURIComponent(id)}`} aria-label={`查看 ${fund.canonical_name} 详情`}><ArrowRight size={17} /></Link>
+                        </div>
+                      </td>
                     </tr>
                   )
                 })}

@@ -916,6 +916,33 @@ def test_prepare_operation_is_explicit_scoped_and_queued(
     assert queued.active_slot == 1
 
 
+def test_archive_fund_preserves_data_and_updates_active_universe_counts(
+    client: TestClient,
+    db_session: Session,
+    seeded: dict[str, int],
+) -> None:
+    response = client.post(f"/api/funds/{seeded['feeder']}/archive")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": seeded["feeder"],
+        "representative_code": "000834",
+        "is_user_selected": False,
+    }
+    assert client.get("/api/funds").json()["total"] == 1
+    assert client.get("/api/funds?is_user_selected=false").json()["total"] == 1
+    preparation = client.get("/api/operations/preparation-status").json()
+    assert preparation["total_funds"] == 1
+    assert preparation["total_shares"] == 1
+    coverage = client.get("/api/purchase-limit-coverage").json()
+    assert coverage["total_funds"] == 1
+    assert coverage["total_shares"] == 1
+    archived = db_session.get(FundContract, seeded["feeder"])
+    assert archived is not None
+    assert archived.reports
+    assert archived.shares
+
+
 def test_data_operation_rejects_unknown_fund_and_concurrent_run(
     client: TestClient,
     seeded: dict[str, int],
@@ -944,6 +971,9 @@ def test_data_operation_rejects_unknown_fund_and_concurrent_run(
     assert active.json()["latest_operation"]["status"] == "queued"
     assert concurrent.status_code == 409
     assert concurrent.json()["detail"] == "data operation 1 (sync-reports) is queued"
+    archived = client.post(f"/api/funds/{seeded['target']}/archive")
+    assert archived.status_code == 409
+    assert "archive after it finishes" in archived.json()["detail"]
 
 
 def test_filters_validation_and_not_found(client: TestClient, seeded: dict[str, int]) -> None:

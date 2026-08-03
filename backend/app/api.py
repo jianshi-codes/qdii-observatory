@@ -86,6 +86,7 @@ from backend.app.schemas import (
     FundReportRead,
     FundShareRead,
     FundSummaryRead,
+    FundUniverseStateRead,
     HoldingOverlapRead,
     HoldingsRead,
     IngestionRunRead,
@@ -552,6 +553,26 @@ def list_funds(
     return FundListRead(
         items=_fund_summaries(db, list(funds)), total=total, offset=offset, limit=limit
     )
+
+
+@router.post("/funds/{fund_id}/archive", response_model=FundUniverseStateRead)
+def archive_fund(fund_id: int, db: DbSession) -> FundUniverseStateRead:
+    active_operation = db.scalar(
+        select(DataOperation).where(DataOperation.active_slot == 1).limit(1)
+    )
+    if active_operation is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"data operation {active_operation.id} ({active_operation.operation}) "
+                f"is {active_operation.status}; archive after it finishes"
+            ),
+        )
+
+    fund = _get_fund(db, fund_id)
+    fund.is_user_selected = False
+    db.commit()
+    return FundUniverseStateRead.model_validate(fund)
 
 
 @router.get("/fund-catalog/options", response_model=FundCatalogOptionsRead)

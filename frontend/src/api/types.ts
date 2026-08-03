@@ -47,6 +47,12 @@ export interface FundSummary {
   [key: string]: unknown
 }
 
+export interface FundUniverseState {
+  id: Identifier
+  representative_code: string
+  is_user_selected: boolean
+}
+
 export interface FundCompanyChoice {
   company_code: string
   company_name: string

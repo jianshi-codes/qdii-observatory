@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FundOverviewPage } from './FundOverviewPage'
 
 function renderPage() {
@@ -26,6 +26,8 @@ function response(body: unknown, status = 200) {
 }
 
 describe('FundOverviewPage', () => {
+  afterEach(cleanup)
+
   beforeEach(() => {
     vi.restoreAllMocks()
   })
@@ -34,8 +36,37 @@ describe('FundOverviewPage', () => {
     vi.stubGlobal('fetch', vi.fn(() => response({ items: [], total: 0 })))
     renderPage()
 
-    expect(await screen.findByText('基金 universe 尚未导入')).toBeInTheDocument()
-    expect(screen.getByText(/不会使用演示基金/)).toBeInTheDocument()
+    expect(await screen.findByText('当前 universe 没有活跃基金')).toBeInTheDocument()
+    expect(screen.getByText(/重新导入已归档基金会恢复原有历史数据/)).toBeInTheDocument()
+  })
+
+  it('archives a fund and refreshes the active universe immediately', async () => {
+    let archived = false
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/funds') {
+        return response(archived
+          ? { items: [], total: 0 }
+          : { items: [{ id: 1, canonical_name: '待归档基金', manager_name: '示例基金', representative_code: '900001' }], total: 1 })
+      }
+      if (path === '/api/funds/1/archive') {
+        expect(init?.method).toBe('POST')
+        archived = true
+        return response({ id: 1, representative_code: '900001', is_user_selected: false })
+      }
+      throw new Error(`unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '归档 待归档基金' }))
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('历史净值、报告和限额不会删除'))
+    expect(await screen.findByText('当前 universe 没有活跃基金')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/funds/1/archive', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/funds')).toHaveLength(2)
   })
 
   it('renders API funds and enforces the five-fund comparison limit', async () => {

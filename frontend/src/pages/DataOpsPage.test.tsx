@@ -394,4 +394,56 @@ describe('DataOpsPage purchase-limit coverage', () => {
       expect.objectContaining({ method: 'POST' }),
     )
   })
+
+  it('archives a covered fund and refreshes preparation and coverage counts', async () => {
+    let archived = false
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      const activeCount = archived ? 0 : 1
+      if (path === '/api/funds') return response({ items: archived ? [] : [{
+        id: 1,
+        canonical_name: '待归档基金',
+        manager_name: '示例基金',
+        representative_code: '900001',
+      }] })
+      if (path === '/api/ingestion-runs') return response({ items: [] })
+      if (path === '/api/data-quality-issues') return response({ items: [] })
+      if (path === '/api/purchase-limit-coverage') return response({
+        total_funds: activeCount,
+        covered_funds: activeCount,
+        total_shares: activeCount,
+        covered_shares: activeCount,
+        latest_snapshot_date: activeCount ? '2026-08-03' : null,
+        availability_state_counts: {},
+        cap_state_counts: {},
+      })
+      if (path === '/api/provider-health') return response({ items: [] })
+      if (path === '/api/operations/preparation-status') return response(preparationStatus(activeCount))
+      if (path === '/api/fund-catalog/options') return response({
+        companies: [],
+        source_categories: [{ value: 'ALL', label: '全部来源分类' }],
+        research_scopes: [{ value: 'ALL', label: '全部 QDII' }],
+        source_provider: 'fixture',
+        source_notice: '公开来源提示',
+      })
+      if (path === '/api/funds/1/archive') {
+        expect(init?.method).toBe('POST')
+        archived = true
+        return response({ id: 1, representative_code: '900001', is_user_selected: false })
+      }
+      throw new Error(`unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '归档 待归档基金' }))
+
+    expect(await screen.findByText('当前 universe 没有活跃基金')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/operations/preparation-status')).toHaveLength(2)
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/purchase-limit-coverage')).toHaveLength(2)
+    })
+  })
 })

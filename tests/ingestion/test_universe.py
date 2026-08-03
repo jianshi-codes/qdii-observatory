@@ -129,6 +129,10 @@ def test_universe_import_is_idempotent(
     assert import_universe(db_session, universe, run) == (3, 5)
     db_session.commit()
     first_share_ids = dict(db_session.execute(select(FundShare.share_code, FundShare.id)).all())
+    archived = db_session.scalar(select(FundContract).order_by(FundContract.id))
+    assert archived is not None
+    archived.is_user_selected = False
+    db_session.commit()
 
     assert import_universe(db_session, universe, run) == (3, 5)
     db_session.commit()
@@ -139,3 +143,4 @@ def test_universe_import_is_idempotent(
         dict(db_session.execute(select(FundShare.share_code, FundShare.id)).all())
         == first_share_ids
     )
+    assert archived.is_user_selected is True

@@ -182,6 +182,12 @@ class FundListRead(ApiModel):
     limit: int
 
 
+class FundUniverseStateRead(ApiModel):
+    id: int
+    representative_code: str
+    is_user_selected: bool
+
+
 class FundCompanyChoiceRead(ApiModel):
     company_code: str
     company_name: str

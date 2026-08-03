@@ -164,3 +164,25 @@ def test_public_import_archives_source_and_is_idempotent(
     assert db_session.scalars(select(FundShare)).all()[0].share_code == "900001"
     assert len(db_session.scalars(select(SourceArtifact)).all()) == 1
     assert len(db_session.scalars(select(IngestionRun)).all()) == 2
+
+
+def test_public_import_restores_an_archived_contract_without_duplication(
+    db_session: Session,
+    provider_fixture_dir: Path,
+    tmp_path: Path,
+) -> None:
+    provider = EastmoneyFundCatalogProvider(FixtureCatalogHttp(provider_fixture_dir))  # type: ignore[arg-type]
+    import_public_funds(db_session, provider, tmp_path / "raw", ("900001",))
+    contract = db_session.scalar(select(FundContract))
+    assert contract is not None
+    original_id = contract.id
+    contract.is_user_selected = False
+    db_session.commit()
+
+    result = import_public_funds(db_session, provider, tmp_path / "raw", ("900001",))
+
+    assert result.status == "succeeded"
+    contracts = list(db_session.scalars(select(FundContract)))
+    assert len(contracts) == 1
+    assert contracts[0].id == original_id
+    assert contracts[0].is_user_selected is True

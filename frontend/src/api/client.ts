@@ -13,6 +13,7 @@ import type {
   FundReport,
   FundShare,
   FundSummary,
+  FundUniverseState,
   IngestionRun,
   NavPoint,
   PortfolioPayload,
@@ -146,6 +147,10 @@ export const api = {
   portfolio: (signal?: AbortSignal) => request<PortfolioPayload>('/api/portfolio', signal),
   funds: (signal?: AbortSignal) =>
     requestCollection<FundSummary>('/api/funds', ['funds'], signal),
+  archiveFund: (id: string, signal?: AbortSignal) =>
+    request<FundUniverseState>(`/api/funds/${encodeURIComponent(id)}/archive`, signal, {
+      method: 'POST',
+    }),
   fund: (id: string, signal?: AbortSignal) =>
     request<FundDetail>(`/api/funds/${encodeURIComponent(id)}`, signal),
   shares: (id: string, signal?: AbortSignal) =>

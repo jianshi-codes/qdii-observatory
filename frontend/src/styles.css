@@ -656,6 +656,23 @@ select:focus-visible {
   min-width: 185px;
 }
 
+.fund-row-actions,
+.coverage-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.archive-error {
+  margin: 10px 0;
+  padding: 10px 12px;
+  color: #b1432f;
+  background: var(--coral-soft);
+  border-radius: 8px;
+  font-size: 10px;
+}
+
 .data-table .numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
