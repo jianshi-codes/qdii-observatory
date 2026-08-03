@@ -2213,11 +2213,59 @@ a.portfolio-fx-source:hover {
 .preparation-stage strong { color: var(--ink); font-size: 18px; font-variant-numeric: tabular-nums; }
 .preparation-stage small { color: var(--ink-faint); font-size: 8px; line-height: 1.45; }
 
+.preparation-action-groups {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.8fr);
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.preparation-action-group {
+  padding: 13px;
+  background: #f4f2ed;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.preparation-single-action {
+  background: var(--jade-soft);
+  border-color: rgb(38 138 123 / 18%);
+}
+
+.preparation-action-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 9px;
+}
+
+.preparation-action-copy span { color: var(--coral); font-size: 8px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+.preparation-action-copy strong { color: var(--ink); font-size: 12px; }
+.preparation-action-copy small { color: var(--ink-soft); font-size: 9px; line-height: 1.5; }
+
+.preparation-single-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preparation-single-controls select {
+  min-width: 0;
+  flex: 1;
+  height: 38px;
+  padding: 0 9px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 9px;
+}
+
 .preparation-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 15px;
 }
 
 .preparation-running,
@@ -2535,6 +2583,10 @@ a.portfolio-fx-source:hover {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .preparation-action-groups {
+    grid-template-columns: 1fr;
+  }
+
   .limit-coverage-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2846,6 +2898,11 @@ a.portfolio-fx-source:hover {
 
   .preparation-stage-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .preparation-single-controls {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .limit-coverage-grid {

@@ -18,7 +18,7 @@ import {
   ShieldAlert,
   WalletCards,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
@@ -28,6 +28,7 @@ import type {
   DataPreparationStatus,
   DataQualityIssue,
   FundSummary,
+  Identifier,
   IngestionRun,
   PublicFundCandidate,
 } from '../api/types'
@@ -123,7 +124,16 @@ const limitCapStates = [
   ['UNKNOWN', '限额未知', 'neutral'],
 ] as const
 
+const preparationActionHelp: Record<DataOperationName, string> = {
+  prepare: '同步近 10 天净值、场内价格与汇率，获取今日直销和代销限额，再获取最近季度报告并解析持仓、计算穿透。',
+  'sync-daily': '同步近 10 天基金净值；场内基金同时更新交易价格，并更新估值所需汇率。不会下载或解析季度报告。',
+  'sync-sales-limits': '同步今天各基金份额的直销和代销可售状态、金额上限及来源证据。不会更新净值或季度报告。',
+  'sync-reports': '查找并下载最近已结束季度的基金报告，保存原始来源文件。不会解析持仓或计算穿透。',
+  'parse-reports': '解析已下载报告中的资产、国家、行业、股票和基金持仓，再计算基金持仓穿透。不会重新下载报告。',
+}
+
 export function DataOpsPage() {
+  const refreshedOperationRef = useRef<Identifier | null>(null)
   const runsQuery = useQuery({
     queryKey: ['ingestion-runs'],
     queryFn: ({ signal }) => api.ingestionRuns(signal),
@@ -193,7 +203,7 @@ export function DataOpsPage() {
     || limitCoverageQuery.isPending || providerHealthQuery.isPending || preparationQuery.isPending
     || operationMutation.isPending
 
-  function refreshAll() {
+  const refreshAll = useCallback(() => {
     void Promise.all([
       fundsQuery.refetch(),
       runsQuery.refetch(),
@@ -202,7 +212,19 @@ export function DataOpsPage() {
       providerHealthQuery.refetch(),
       preparationQuery.refetch(),
     ])
-  }
+  }, [fundsQuery, runsQuery, issuesQuery, limitCoverageQuery, providerHealthQuery, preparationQuery])
+
+  const operationId = operation?.id
+  const operationStatus = operation?.status
+
+  useEffect(() => {
+    if (operationId === undefined || !operationStatus) return
+    const isFinished = !['queued', 'running'].includes(operationStatus)
+    if (isFinished && refreshedOperationRef.current !== operationId) {
+      refreshedOperationRef.current = operationId
+      refreshAll()
+    }
+  }, [operationId, operationStatus, refreshAll])
 
   function runOperation(operation: DataOperationName, fundCodes: string[] = []) {
     operationMutation.mutate({ operation, fundCodes })
@@ -224,6 +246,7 @@ export function DataOpsPage() {
       <CatalogImportPanel onImported={refreshAll} />
 
       <DataPreparationPanel
+        funds={funds}
         status={preparationQuery.data}
         pending={preparationQuery.isPending}
         error={preparationQuery.error}
@@ -413,6 +436,7 @@ export function DataOpsPage() {
 }
 
 function DataPreparationPanel({
+  funds,
   status,
   pending,
   error,
@@ -422,6 +446,7 @@ function DataPreparationPanel({
   onRefresh,
   onRun,
 }: {
+  funds: FundSummary[]
   status: DataPreparationStatus | undefined
   pending: boolean
   error: unknown
@@ -431,6 +456,7 @@ function DataPreparationPanel({
   onRefresh: () => void
   onRun: (operation: DataOperationName, fundCodes?: string[]) => void
 }) {
+  const [selectedFundCode, setSelectedFundCode] = useState('')
   if (pending) return <section className="panel"><LoadingPanel label="计算基金数据准备状态…" /></section>
   if (error) return <section className="panel"><ErrorPanel error={error} onRetry={onRefresh} /></section>
   if (!status) return null
@@ -480,22 +506,46 @@ function DataPreparationPanel({
       </div>
 
       {total > 0 && (
-        <div className="preparation-actions">
-          <button className="button button-primary" type="button" disabled={operationBusy} onClick={() => onRun('prepare')}>
-            <Play size={15} />{fullyReady ? `更新全部 ${total} 只基金数据` : `开始准备 ${total} 只基金数据`}
-          </button>
-          <button className="button button-secondary" type="button" disabled={operationBusy} onClick={() => onRun('sync-daily')}>
-            同步日常数据
-          </button>
-          <button className="button button-secondary" type="button" disabled={operationBusy} onClick={() => onRun('sync-sales-limits')}>
-            仅同步今日限额
-          </button>
-          <button className="button button-secondary" type="button" disabled={operationBusy} onClick={() => onRun('sync-reports')}>
-            获取 {status.report_year} Q{status.report_quarter} 报告
-          </button>
-          <button className="button button-secondary" type="button" disabled={operationBusy || status.report_downloaded_funds === 0} onClick={() => onRun('parse-reports')}>
-            解析报告并计算穿透
-          </button>
+        <div className="preparation-action-groups">
+          <div className="preparation-action-group preparation-single-action">
+            <div className="preparation-action-copy">
+              <span>刚新增一只基金？</span>
+              <strong>只补齐所选基金</strong>
+              <small>无需重跑全部基金；与下方覆盖表中的“补齐数据”作用相同。</small>
+            </div>
+            <div className="preparation-single-controls">
+              <select aria-label="选择要补齐的基金" value={selectedFundCode} onChange={(event) => setSelectedFundCode(event.target.value)}>
+                <option value="">选择基金…</option>
+                {funds.map((fund) => <option value={fund.representative_code} key={String(fund.id)}>{fund.representative_code} · {fund.canonical_name}</option>)}
+              </select>
+              <button className="button button-primary" type="button" disabled={operationBusy || !selectedFundCode} title={preparationActionHelp.prepare} onClick={() => onRun('prepare', [selectedFundCode])}>
+                <Play size={15} />补齐这一只
+              </button>
+            </div>
+          </div>
+          <div className="preparation-action-group preparation-batch-action">
+            <div className="preparation-action-copy">
+              <span>全部基金 / 分阶段维护</span>
+              <small>鼠标停留在按钮上可查看具体范围。</small>
+            </div>
+            <div className="preparation-actions">
+              <button className="button button-primary" type="button" disabled={operationBusy} title={preparationActionHelp.prepare} onClick={() => onRun('prepare')}>
+                <Play size={15} />{fullyReady ? `更新全部 ${total} 只基金数据` : `开始准备 ${total} 只基金数据`}
+              </button>
+              <button className="button button-secondary" type="button" disabled={operationBusy} title={preparationActionHelp['sync-daily']} onClick={() => onRun('sync-daily')}>
+                同步日常数据
+              </button>
+              <button className="button button-secondary" type="button" disabled={operationBusy} title={preparationActionHelp['sync-sales-limits']} onClick={() => onRun('sync-sales-limits')}>
+                仅同步今日限额
+              </button>
+              <button className="button button-secondary" type="button" disabled={operationBusy} title={preparationActionHelp['sync-reports']} onClick={() => onRun('sync-reports')}>
+                获取 {status.report_year} Q{status.report_quarter} 报告
+              </button>
+              <button className="button button-secondary" type="button" disabled={operationBusy || status.report_downloaded_funds === 0} title={preparationActionHelp['parse-reports']} onClick={() => onRun('parse-reports')}>
+                解析报告并计算穿透
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

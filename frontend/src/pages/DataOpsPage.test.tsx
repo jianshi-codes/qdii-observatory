@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -270,7 +270,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
       error_message: null,
       created_at: '2026-08-03T04:30:00Z',
     }
-    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const path = String(input)
       if (path === '/api/funds') return response({ items: [] })
       if (path === '/api/ingestion-runs') return response({ items: [] })
@@ -294,13 +294,17 @@ describe('DataOpsPage purchase-limit coverage', () => {
         source_notice: '公开来源提示',
       })
       throw new Error(`unexpected request: ${path}`)
-    }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     renderPage()
 
     expect(await screen.findByText('任务 #14 已结束：部分完成')).toBeInTheDocument()
     expect(screen.getByText(/部分完成表示已有可用数据/)).toBeInTheDocument()
     expect(screen.getByText(/12 个基金合同、33 个份额/)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/funds')).toHaveLength(2)
+    })
   })
 
   it('guides the user from imported funds into an explicit preparation workflow', async () => {
@@ -335,7 +339,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
       })
       if (path === '/api/operations/prepare') {
         expect(init?.method).toBe('POST')
-        expect(init?.body).toBe(JSON.stringify({ fund_codes: [], lookback_days: 10 }))
+        expect(init?.body).toBe(JSON.stringify({ fund_codes: ['900001'], lookback_days: 10 }))
         return response({
           id: 9,
           operation: 'prepare',
@@ -366,8 +370,12 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(screen.getByText('净值与价格')).toBeInTheDocument()
     expect(screen.getByText('穿透计算')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '解析报告并计算穿透' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '同步日常数据' })).toHaveAttribute('title', expect.stringContaining('近 10 天基金净值'))
+    expect(screen.getByRole('button', { name: '仅同步今日限额' })).toHaveAttribute('title', expect.stringContaining('直销和代销'))
+    expect(screen.getByRole('button', { name: '获取 2026 Q2 报告' })).toHaveAttribute('title', expect.stringContaining('不会解析持仓'))
 
-    await user.click(screen.getByRole('button', { name: '开始准备 1 只基金数据' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: '选择要补齐的基金' }), '900001')
+    await user.click(screen.getByRole('button', { name: '补齐这一只' }))
 
     expect(await screen.findByText(/任务 #9：已排队/)).toBeInTheDocument()
     expect(screen.getByText(/阶段 0 \/ 3/)).toBeInTheDocument()
