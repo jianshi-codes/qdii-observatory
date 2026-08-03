@@ -104,6 +104,12 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(screen.getByText('有限额')).toBeInTheDocument()
     expect(screen.getByText('不限额')).toBeInTheDocument()
     expect(screen.getByText('限额未知')).toBeInTheDocument()
+    const coverageButtons = screen.getAllByRole('button', { name: '补齐数据' })
+    expect(coverageButtons).toHaveLength(2)
+    for (const button of coverageButtons) {
+      expect(button).not.toHaveAttribute('title')
+      expect(document.getElementById(button.getAttribute('aria-describedby') ?? '')).toHaveTextContent('同步近 10 天净值')
+    }
     expect(screen.getByText('渠道覆盖不完整')).toBeInTheDocument()
     expect(screen.getByText('SALES_LIMIT_COVERAGE_INCOMPLETE')).toBeInTheDocument()
     await user.click(screen.getByText('渠道覆盖不完整'))

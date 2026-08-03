@@ -2338,6 +2338,24 @@ a.portfolio-fx-source:hover {
   transform: translateY(0);
 }
 
+.coverage-table .preparation-action-tooltip {
+  right: 0;
+  left: auto;
+  transform: translateY(4px);
+}
+
+.coverage-table .preparation-action-tooltip::after {
+  right: 24px;
+  left: auto;
+  transform: none;
+}
+
+.coverage-table .preparation-action-help:hover .preparation-action-tooltip,
+.coverage-table .preparation-action-help:focus .preparation-action-tooltip,
+.coverage-table .preparation-action-help:focus-within .preparation-action-tooltip {
+  transform: translateY(0);
+}
+
 .preparation-running,
 .preparation-result {
   display: flex;

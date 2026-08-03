@@ -405,15 +405,14 @@ export function DataOpsPage() {
                   <td><StatusBadge value={field(fund, 'lookthrough_status')} label={lookthroughStatusLabel(field(fund, 'lookthrough_status'))} /></td>
                   <td>{formatDate(field(fund, 'latest_nav_date'))}</td>
                   <td>
-                    <button
+                    <PreparationActionButton
                       className="button button-quiet"
-                      type="button"
                       disabled={operationBusy}
-                      title="同步该基金的日常数据、最近季度报告并重新计算穿透"
+                      help={preparationActionHelp.prepare}
                       onClick={() => runOperation('prepare', [fund.representative_code])}
                     >
                       <Play size={14} />补齐数据
-                    </button>
+                    </PreparationActionButton>
                   </td>
                 </tr>
               ))}</tbody>
