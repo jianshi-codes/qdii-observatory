@@ -159,6 +159,15 @@ def test_nav_provider_rejects_page_mismatch_and_missing_rows(
         provider.fetch_page("017653", 1, 2)
 
 
+def test_nav_provider_rejects_page_sizes_unsupported_by_upstream(
+    fixture_nav_provider: tuple[EastmoneyNavProvider, Any],
+) -> None:
+    provider, _http = fixture_nav_provider
+
+    with pytest.raises(ValueError, match="Invalid NAV pagination"):
+        provider.fetch_page("017653", 1, 21)
+
+
 class FixtureChartNavHttp:
     def __init__(self, payload: bytes) -> None:
         self.payload = payload

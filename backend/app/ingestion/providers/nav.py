@@ -19,6 +19,7 @@ class EastmoneyNavProvider:
     name = "EASTMONEY_NAV"
     version = "lsjz-v1"
     endpoint = "https://api.fund.eastmoney.com/f10/lsjz"
+    max_page_size = 20
 
     def __init__(self, http: ProviderHttpClient) -> None:
         self.http = http
@@ -31,7 +32,7 @@ class EastmoneyNavProvider:
         start_date: date | None = None,
         end_date: date | None = None,
     ) -> NavPage:
-        if page_index < 1 or page_size < 1 or page_size > 1000:
+        if page_index < 1 or page_size < 1 or page_size > self.max_page_size:
             raise ValueError("Invalid NAV pagination")
         params: dict[str, str | int] = {
             "fundCode": share_code,

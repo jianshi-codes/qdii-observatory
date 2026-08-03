@@ -1049,6 +1049,36 @@ def _decode_portfolio_file(request: PortfolioImportFileRequest) -> bytes:
         raise HTTPException(status_code=422, detail="上传文件不是有效的 Base64 内容") from error
 
 
+def _portfolio_import_contract_states(
+    db: Session,
+) -> dict[int, tuple[bool, bool]]:
+    return {
+        contract.id: (contract.is_user_selected, contract.is_dependency)
+        for contract in db.scalars(select(FundContract)).all()
+    }
+
+
+def _restore_portfolio_import_contract_states(
+    db: Session,
+    share_codes: set[str],
+    prior_states: dict[int, tuple[bool, bool]],
+) -> None:
+    """Undo active-universe changes while retaining imported public catalog evidence."""
+
+    db.rollback()
+    contracts: dict[int, FundContract] = {}
+    for share in db.scalars(select(FundShare).where(FundShare.share_code.in_(share_codes))):
+        contracts[share.fund_contract_id] = share.fund_contract
+    for contract in contracts.values():
+        previous = prior_states.get(contract.id)
+        if previous is None:
+            contract.is_user_selected = False
+            contract.is_dependency = False
+        else:
+            contract.is_user_selected, contract.is_dependency = previous
+    db.commit()
+
+
 @portfolio_router.post(
     "/portfolio/import/preview",
     response_model=PortfolioImportPreviewRead,
@@ -1095,6 +1125,8 @@ def confirm_portfolio_import(
         raise HTTPException(status_code=503, detail=f"本地数据目录不可用：{error}") from error
 
     positions = preview["positions"]
+    affected_codes = {str(item["share_code"]) for item in positions}
+    prior_contract_states = _portfolio_import_contract_states(db)
     add_codes = tuple(
         sorted({item["share_code"] for item in positions if item["universe_action"] == "ADD"})
     )
@@ -1102,56 +1134,66 @@ def confirm_portfolio_import(
         {item["share_code"] for item in positions if item["universe_action"] == "RESTORE"}
     )
     imported_codes: list[str] = []
-    if add_codes:
-        public_result = import_public_funds(db, provider, raw_root, add_codes)
-        if public_result.failures:
-            failures = "；".join(
-                f"{code}: {message}" for code, message in public_result.failures.items()
-            )
-            raise HTTPException(status_code=502, detail=f"加入基金 universe 失败：{failures}")
-        imported_codes = list(public_result.imported_codes)
-
-    for raw in workbook.payload["positions"]:
-        share = db.scalar(
-            select(FundShare).where(FundShare.share_code == str(raw["share_code"]))
-        )
-        if share is None:
-            raise HTTPException(
-                status_code=502,
-                detail=f"基金 {raw['share_code']} 加入 universe 后仍不存在",
-            )
-        share.fund_contract.is_user_selected = True
-        share.fund_contract.is_dependency = False
-    db.commit()
-
-    missing_nav = anchor_missing_codes(db, workbook)
-    if missing_nav:
-        start_date, end_date = nav_sync_range(workbook)
-        try:
-            with provider_client("eastmoney_nav") as http:
-                sync_nav(
-                    db,
-                    EastmoneyNavProvider(http),
-                    raw_root,
-                    start_date=start_date,
-                    end_date=end_date,
-                    share_codes=missing_nav,
-                    page_size=1000,
-                )
-        except Exception as error:
-            raise HTTPException(status_code=502, detail=f"补充基金净值失败：{error}") from error
-        still_missing = anchor_missing_codes(db, workbook)
-        if still_missing:
-            raise HTTPException(
-                status_code=422,
-                detail=f"这些基金在快照日期前没有可用净值：{sorted(still_missing)}",
-            )
-
+    missing_nav: set[str] = set()
     try:
-        result = import_portfolio_payload(db, workbook.payload)
-    except ValueError as error:
-        db.rollback()
-        raise HTTPException(status_code=422, detail=f"写入持仓失败：{error}") from error
+        if add_codes:
+            public_result = import_public_funds(db, provider, raw_root, add_codes)
+            if public_result.failures:
+                failures = "；".join(
+                    f"{code}: {message}" for code, message in public_result.failures.items()
+                )
+                raise HTTPException(status_code=502, detail=f"加入基金 universe 失败：{failures}")
+            imported_codes = list(public_result.imported_codes)
+
+        for raw in workbook.payload["positions"]:
+            share = db.scalar(
+                select(FundShare).where(FundShare.share_code == str(raw["share_code"]))
+            )
+            if share is None:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"基金 {raw['share_code']} 加入 universe 后仍不存在",
+                )
+            share.fund_contract.is_user_selected = True
+            share.fund_contract.is_dependency = False
+        db.commit()
+
+        missing_nav = anchor_missing_codes(db, workbook)
+        if missing_nav:
+            start_date, end_date = nav_sync_range(workbook)
+            try:
+                with provider_client("eastmoney_nav") as http:
+                    sync_nav(
+                        db,
+                        EastmoneyNavProvider(http),
+                        raw_root,
+                        start_date=start_date,
+                        end_date=end_date,
+                        share_codes=missing_nav,
+                        page_size=EastmoneyNavProvider.max_page_size,
+                    )
+            except Exception as error:
+                raise HTTPException(
+                    status_code=502, detail=f"补充基金净值失败：{error}"
+                ) from error
+            still_missing = anchor_missing_codes(db, workbook)
+            if still_missing:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"这些基金在快照日期前没有可用净值：{sorted(still_missing)}",
+                )
+
+        try:
+            result = import_portfolio_payload(db, workbook.payload)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=f"写入持仓失败：{error}") from error
+    except Exception:
+        _restore_portfolio_import_contract_states(
+            db,
+            affected_codes,
+            prior_contract_states,
+        )
+        raise
     return PortfolioImportResultRead(
         positions_written=result.positions_written,
         cash_flows_written=result.cash_flows_written,

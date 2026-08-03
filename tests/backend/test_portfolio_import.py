@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
@@ -213,6 +214,7 @@ def test_confirm_portfolio_import_adds_unknown_fund_and_syncs_nav(
         return PublicImportResult("succeeded", codes, {})
 
     def fake_sync_nav(session: Session, *args: object, **kwargs: object) -> SimpleNamespace:
+        assert kwargs["page_size"] == 20
         share = session.scalar(select(FundShare).where(FundShare.share_code == "654321"))
         assert share is not None
         session.add(
@@ -228,7 +230,7 @@ def test_confirm_portfolio_import_adds_unknown_fund_and_syncs_nav(
         return SimpleNamespace(status="succeeded")
 
     @contextmanager
-    def fake_provider_client(*_names: str):
+    def fake_provider_client(*_names: str) -> Iterator[SimpleNamespace]:
         yield SimpleNamespace()
 
     monkeypatch.setattr(api_module, "import_public_funds", fake_import_public_funds)
@@ -259,4 +261,79 @@ def test_confirm_portfolio_import_adds_unknown_fund_and_syncs_nav(
     )
     assert fund is not None and fund.is_user_selected is True
     assert db_session.scalar(select(PortfolioPosition)) is not None
+    client.app.dependency_overrides.pop(api_module.get_fund_catalog_provider, None)
+
+
+def test_confirm_portfolio_import_restores_universe_state_when_nav_is_missing(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    candidate = SimpleNamespace(
+        fund_code="654321",
+        fund_name="新增 QDII 基金",
+        manager_name="新增基金公司",
+        currency="CNY",
+    )
+    provider = SimpleNamespace(lookup=lambda _: SimpleNamespace(candidates=(candidate,)))
+    client.app.dependency_overrides[api_module.get_fund_catalog_provider] = lambda: provider
+
+    def fake_import_public_funds(
+        session: Session,
+        _provider: object,
+        _raw_root: Path,
+        codes: tuple[str, ...],
+    ) -> PublicImportResult:
+        fund = FundContract(
+            canonical_name=candidate.fund_name,
+            manager_name=candidate.manager_name,
+            representative_code=candidate.fund_code,
+            is_user_selected=True,
+        )
+        session.add(fund)
+        session.flush()
+        session.add(
+            FundShare(
+                fund_contract_id=fund.id,
+                share_code=candidate.fund_code,
+                currency="CNY",
+            )
+        )
+        session.commit()
+        return PublicImportResult("succeeded", codes, {})
+
+    @contextmanager
+    def fake_provider_client(*_names: str) -> Iterator[SimpleNamespace]:
+        yield SimpleNamespace()
+
+    monkeypatch.setattr(api_module, "import_public_funds", fake_import_public_funds)
+    monkeypatch.setattr(
+        api_module,
+        "sync_nav",
+        lambda *_args, **_kwargs: SimpleNamespace(status="partial"),
+    )
+    monkeypatch.setattr(api_module, "provider_client", fake_provider_client)
+    monkeypatch.setattr(api_module, "raw_data_dir", lambda: tmp_path)
+    content = _filled_workbook(share_code="654321")
+    encoded = base64.b64encode(content).decode("ascii")
+    preview = client.post(
+        "/api/portfolio/import/preview",
+        json={"filename": "portfolio.xlsx", "content_base64": encoded},
+    )
+    confirm = client.post(
+        "/api/portfolio/import/confirm",
+        json={
+            "filename": "portfolio.xlsx",
+            "content_base64": encoded,
+            "file_digest": preview.json()["file_digest"],
+        },
+    )
+
+    assert confirm.status_code == 422
+    fund = db_session.scalar(
+        select(FundContract).where(FundContract.representative_code == "654321")
+    )
+    assert fund is not None and fund.is_user_selected is False
+    assert db_session.scalar(select(PortfolioPosition)) is None
     client.app.dependency_overrides.pop(api_module.get_fund_catalog_provider, None)
