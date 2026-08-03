@@ -578,3 +578,149 @@ class DataQualityIssueRead(ApiModel):
     resolved_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+Q2ConsistencyStatus = Literal[
+    "CONSISTENT",
+    "SLIGHTLY_DIVERGING",
+    "LIKELY_EXPOSURE_CHANGED",
+    "INSUFFICIENT_DATA",
+    "NOT_APPLICABLE",
+]
+Q2AnalysisMode = Literal["Q2_EX_POST", "Q2_LIVE"]
+Q2Confidence = Literal["HIGH", "MEDIUM", "LOW", "LOW_CONFIDENCE"]
+
+
+class Q2AnalysisSourceRead(ApiModel):
+    source_type: str
+    provider: str
+    url: str | None
+    data_date: date | None
+    fetched_at: datetime | None
+
+
+class Q2CoverageRead(ApiModel):
+    disclosed_security_weight_pct: Decimal
+    mapped_security_weight_pct: Decimal
+    priced_security_weight_pct: Decimal
+    unresolved_security_weight_pct: Decimal
+    missing_market_data_weight_pct: Decimal
+    undisclosed_equity_weight_pct: Decimal
+    proxy_weight_pct: Decimal
+    fund_holding_weight_pct: Decimal
+    resolved_fund_holding_weight_pct: Decimal
+    unresolved_fund_weight_pct: Decimal
+    cash_weight_pct: Decimal
+    total_explained_weight_pct: Decimal
+
+
+class Q2ContributionRead(ApiModel):
+    name: str
+    symbol: str | None
+    weight_pct: Decimal
+    return_pct: Decimal | None
+    contribution_pct: Decimal | None
+    trade_date: date | None
+    previous_trade_date: date | None
+    source: str
+    note: str | None
+
+
+class Q2PredictionRead(ApiModel):
+    estimate_date: date
+    nav_date: date
+    actual_return_pct: Decimal | None
+    actual_return_source: str | None
+    predicted_return_pct: Decimal | None
+    lower_bound_pct: Decimal | None
+    upper_bound_pct: Decimal | None
+    known_contribution_pct: Decimal | None
+    proxy_contribution_pct: Decimal | None
+    fund_holding_contribution_pct: Decimal | None
+    cash_contribution_pct: Decimal
+    residual_pct: Decimal | None
+    analysis_mode: Q2AnalysisMode
+    confidence: Q2Confidence
+    coverage: Q2CoverageRead
+    security_contributions: list[Q2ContributionRead]
+    proxy_contributions: list[Q2ContributionRead]
+    fund_holding_contributions: list[Q2ContributionRead]
+    model: str
+
+
+class Q2LatestComparisonRead(ApiModel):
+    comparison_date: date
+    nav_date: date
+    predicted_return_pct: Decimal
+    actual_return_pct: Decimal
+    actual_return_source: str | None
+    analysis_mode: Q2AnalysisMode
+    actual_minus_predicted_pct: Decimal
+
+
+class Q2ConsistencyRead(ApiModel):
+    status: Q2ConsistencyStatus
+    observation_count: int
+    mae_5_pct: Decimal | None
+    mae_10_pct: Decimal | None
+    mae_20_pct: Decimal | None
+    signed_bias_5_pct: Decimal | None
+    signed_bias_10_pct: Decimal | None
+    cumulative_residual_pct: Decimal | None
+    actual_predicted_correlation: Decimal | None
+    same_direction_residual_streak: int
+    recent_coverage_pct: Decimal | None
+    explanation: str
+
+
+class Q2ProxyRead(ApiModel):
+    symbol: str
+    currency: str
+    weight: Decimal
+    reason: str
+    confidence: Literal["HIGH", "MEDIUM", "LOW"]
+
+
+class Q2UnmappedSecurityRead(ApiModel):
+    security_name: str
+    security_code_raw: str | None
+    market: str | None
+    weight_pct: Decimal
+    reason: str
+
+
+class Q2SeriesPointRead(ApiModel):
+    nav_date: date
+    actual_return_pct: Decimal | None
+    predicted_return_pct: Decimal | None
+    cumulative_actual_return_pct: Decimal | None
+    cumulative_predicted_return_pct: Decimal | None
+    analysis_mode: Q2AnalysisMode
+
+
+class Q2FundAnalysisRead(ApiModel):
+    fund_id: int
+    fund_code: str
+    representative_code: str
+    fund_name: str
+    share_code: str
+    share_currency: str
+    data_as_of: date
+    market_data_fetched_at: datetime | None
+    report_period_end: date | None
+    report_public_available_at: datetime | None
+    analysis_start_date: date
+    as_of: date
+    analysis_mode: Q2AnalysisMode | None
+    model: str
+    prediction: Q2PredictionRead | None
+    latest_comparison: Q2LatestComparisonRead | None
+    consistency: Q2ConsistencyRead
+    coverage: Q2CoverageRead | None
+    prediction_observation_coverage_pct: Decimal | None
+    proxies: list[Q2ProxyRead]
+    unmapped_securities: list[Q2UnmappedSecurityRead]
+    limitations: list[str]
+    sources: list[Q2AnalysisSourceRead]
+    market_data_errors: list[str]
+    series: list[Q2SeriesPointRead] = Field(default_factory=list)

@@ -53,6 +53,28 @@ export interface FundUniverseState {
   is_user_selected: boolean
 }
 
+export type Q2AnalysisMode = 'Q2_EX_POST' | 'Q2_LIVE'
+
+export interface TodayEstimatePayload {
+  share_code: string
+  prediction: {
+    estimate_date: string
+    nav_date: string
+    predicted_return_pct: number | string | null
+  } | null
+  latest_comparison: {
+    comparison_date: string
+    nav_date: string
+    predicted_return_pct: number | string
+    actual_return_pct: number | string
+    actual_minus_predicted_pct: number | string
+    analysis_mode: Q2AnalysisMode
+  } | null
+  consistency: {
+    status: 'CONSISTENT' | 'SLIGHTLY_DIVERGING' | 'LIKELY_EXPOSURE_CHANGED' | 'INSUFFICIENT_DATA' | 'NOT_APPLICABLE'
+  }
+}
+
 export interface FundCompanyChoice {
   company_code: string
   company_name: string

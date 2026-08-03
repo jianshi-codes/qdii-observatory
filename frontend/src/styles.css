@@ -673,6 +673,81 @@ select:focus-visible {
   font-size: 10px;
 }
 
+.q2-on-demand-column {
+  min-width: 220px;
+}
+
+.q2-on-demand-cell {
+  min-width: 196px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.q2-on-demand-cell > small,
+.q2-on-demand-scope {
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+
+.q2-estimate-button {
+  min-height: 30px;
+  white-space: nowrap;
+}
+
+.q2-estimate-state,
+.q2-estimate-error {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.q2-estimate-state { color: var(--ink-faint); }
+.q2-estimate-error { color: #b1432f; }
+
+.q2-on-demand-values {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin: 0;
+}
+
+.q2-on-demand-values > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 6px 8px;
+  background: #f0ede6;
+  border-radius: 7px;
+}
+
+.q2-on-demand-values dt {
+  color: var(--ink-faint);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.q2-on-demand-values dd {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.q2-on-demand-values small {
+  grid-column: 1 / -1;
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .data-table .numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;

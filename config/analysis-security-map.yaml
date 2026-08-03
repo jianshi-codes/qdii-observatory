@@ -1,0 +1,83 @@
+version: 1
+mappings:
+  - match:
+      security_code_raw: KYG875721634
+      market: HKEX
+    symbol: 0700.HK
+    currency: HKD
+    reason: 腾讯控股 ISIN 对应港交所 0700
+  - match:
+      security_code_raw: KYG017191142
+      market: HKEX
+    symbol: 9988.HK
+    currency: HKD
+    reason: 阿里巴巴集团 ISIN 对应港交所 9988
+  - match:
+      security_code_raw: HK0388045442
+      market: HKEX
+    symbol: 0388.HK
+    currency: HKD
+    reason: 香港交易所 ISIN 对应港交所 0388
+  - match:
+      security_code_raw: CNE100006WS8
+      market: HKEX
+    symbol: 3750.HK
+    currency: HKD
+    reason: 宁德时代 H 股 ISIN 对应港交所 3750
+  - match:
+      security_code_raw: KYG6427A1022
+      market: HKEX
+    symbol: 9999.HK
+    currency: HKD
+    reason: 网易 ISIN 对应港交所 9999
+  - match:
+      security_code_raw: US67066G1040
+    symbol: NVDA
+    currency: USD
+    reason: NVIDIA ISIN 对应 Nasdaq ticker
+  - match:
+      security_code_raw: US02079K1079
+    symbol: GOOGL
+    currency: USD
+    reason: Alphabet A 类 ISIN 对应 Nasdaq ticker
+  - match:
+      security_code_raw: US0378331005
+    symbol: AAPL
+    currency: USD
+    reason: Apple ISIN 对应 Nasdaq ticker
+  - match:
+      security_code_raw: US5949181045
+    symbol: MSFT
+    currency: USD
+    reason: Microsoft ISIN 对应 Nasdaq ticker
+  - match:
+      security_code_raw: US11135F1012
+    symbol: AVGO
+    currency: USD
+    reason: Broadcom ISIN 对应 Nasdaq ticker
+  - match:
+      security_code_raw: US8740391003
+    symbol: TSM
+    currency: USD
+    reason: 台积电 ADR ISIN 对应 NYSE ticker
+  - match:
+      security_code_raw: US0231351067
+    symbol: AMZN
+    currency: USD
+    reason: Amazon ISIN 对应 Nasdaq ticker
+  - match:
+      security_code_raw: US5324571083
+    symbol: LLY
+    currency: USD
+    reason: 礼来 ISIN 对应 NYSE ticker
+  - match:
+      security_code_raw: KR7000660001
+      market: KRX
+    symbol: 000660.KS
+    currency: KRW
+    reason: SK 海力士 ISIN 对应韩国交易所 000660
+  - match:
+      security_code_raw: GB0002875804
+    symbol: BATS.L
+    currency: GBP
+    reason: 英美烟草 ISIN 对应伦敦交易所 ticker

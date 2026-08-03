@@ -150,6 +150,8 @@ describe('FundOverviewPage', () => {
     expect(page.getByText('+1.25%')).toBeInTheDocument()
     expect(page.getByRole('button', { name: '香港' })).toBeInTheDocument()
     expect(page.getByRole('button', { name: '中国大陆' })).toBeInTheDocument()
+    expect(page.queryByRole('button', { name: '信息技术' })).not.toBeInTheDocument()
+    expect(page.getByRole('columnheader', { name: '最新预估涨幅' })).toBeInTheDocument()
     expect(page.queryByRole('link', { name: /1万元\/日/ })).not.toBeInTheDocument()
     expect(page.queryByRole('columnheader', { name: 'Q2 报告' })).not.toBeInTheDocument()
 
@@ -167,6 +169,8 @@ describe('FundOverviewPage', () => {
     await user.click(page.getByText('显示字段'))
     expect(page.getByRole('checkbox', { name: '香港' })).toBeChecked()
     expect(page.getByRole('checkbox', { name: '中国大陆' })).toBeChecked()
+    expect(page.getByRole('checkbox', { name: '信息技术' })).not.toBeChecked()
+    expect(page.getByRole('checkbox', { name: '最新预估涨幅' })).toBeChecked()
     expect(page.getByRole('checkbox', { name: '直销限额' })).not.toBeChecked()
     expect(page.getByRole('checkbox', { name: '代销限额' })).not.toBeChecked()
     expect(page.getByRole('checkbox', { name: 'Q2 报告' })).not.toBeChecked()
@@ -174,5 +178,51 @@ describe('FundOverviewPage', () => {
     expect(page.getByRole('link', { name: /1万元\/日/ })).toHaveAttribute('href', 'https://example.test/notice.pdf')
     await user.click(page.getByRole('checkbox', { name: '韩国' }))
     expect(page.queryByRole('button', { name: '韩国' })).not.toBeInTheDocument()
+  })
+
+  it('loads the disclosed-holdings estimate only for the requested active fund', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/funds') return response({ items: [{
+        id: 1,
+        canonical_name: '主动科技基金',
+        manager_name: '测试基金公司',
+        representative_code: '000001',
+        wrapper_type: 'DIRECT',
+      }], total: 1 })
+      if (path === '/api/funds/1/today-estimate?share_code=000001') return response({
+        share_code: '000001',
+        prediction: {
+          estimate_date: '2026-08-03',
+          nav_date: '2026-07-31',
+          predicted_return_pct: '0.80',
+        },
+        latest_comparison: {
+          comparison_date: '2026-07-31',
+          nav_date: '2026-07-30',
+          predicted_return_pct: '0.70',
+          actual_return_pct: '0.95',
+          actual_minus_predicted_pct: '0.25',
+          analysis_mode: 'Q2_LIVE',
+        },
+        consistency: { status: 'CONSISTENT' },
+      })
+      throw new Error(`unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderPage()
+
+    const loadButton = await screen.findByRole('button', {
+      name: '加载 主动科技基金 代表份额 000001 的 Q2 估算',
+    })
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/today-estimate'))).toHaveLength(0)
+    await user.click(loadButton)
+
+    expect(await screen.findByText('+0.80%')).toBeInTheDocument()
+    expect(screen.getByText('收益日 2026/08/03 · 对应净值日 2026/07/31')).toBeInTheDocument()
+    expect(screen.getByText('+0.95%')).toBeInTheDocument()
+    expect(screen.getByText('+0.25 个百分点')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/today-estimate'))).toHaveLength(1)
   })
 })

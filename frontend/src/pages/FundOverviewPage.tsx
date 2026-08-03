@@ -18,6 +18,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { FundSummary, PurchaseLimitSummary } from '../api/types'
+import { OnDemandEstimateCell } from '../components/OnDemandEstimateCell'
 import { EmptyPanel, ErrorPanel, LoadingPanel } from '../components/StatePanel'
 import { StatusBadge } from '../components/StatusBadge'
 import {
@@ -43,13 +44,14 @@ type ColumnKey =
   | 'china_country_pct'
   | 'information_technology_pct'
   | 'disclosed_top10_pct'
+  | 'latest_estimated_return_pct'
   | 'latest_nav_return_pct'
   | 'direct_purchase_limit'
   | 'distribution_purchase_limit'
   | 'latest_report_status'
   | 'latest_nav_date'
 
-type SortKey = Exclude<ColumnKey, 'tech_scope' | 'latest_report_status' | 'latest_nav_date'>
+type SortKey = Exclude<ColumnKey, 'tech_scope' | 'latest_estimated_return_pct' | 'latest_report_status' | 'latest_nav_date'>
 type SortDirection = 'asc' | 'desc'
 
 const columns: Array<{ key: ColumnKey; label: string }> = [
@@ -63,6 +65,7 @@ const columns: Array<{ key: ColumnKey; label: string }> = [
   { key: 'china_country_pct', label: '中国大陆' },
   { key: 'information_technology_pct', label: '信息技术' },
   { key: 'disclosed_top10_pct', label: '前十大' },
+  { key: 'latest_estimated_return_pct', label: '最新预估涨幅' },
   { key: 'latest_nav_return_pct', label: '最新涨跌幅' },
   { key: 'direct_purchase_limit', label: '直销限额' },
   { key: 'distribution_purchase_limit', label: '代销限额' },
@@ -71,6 +74,7 @@ const columns: Array<{ key: ColumnKey; label: string }> = [
 ]
 
 const defaultHiddenColumns = new Set<ColumnKey>([
+  'information_technology_pct',
   'direct_purchase_limit',
   'distribution_purchase_limit',
   'latest_report_status',
@@ -344,6 +348,7 @@ export function FundOverviewPage() {
                   {visible('china_country_pct') && <SortableHeader columnKey="china_country_pct" label="中国大陆" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('information_technology_pct') && <SortableHeader columnKey="information_technology_pct" label="信息技术" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('disclosed_top10_pct') && <SortableHeader columnKey="disclosed_top10_pct" label="前十大" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
+                  {visible('latest_estimated_return_pct') && <th>最新预估涨幅</th>}
                   {visible('latest_nav_return_pct') && <SortableHeader columnKey="latest_nav_return_pct" label="最新涨跌幅" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('direct_purchase_limit') && <SortableHeader columnKey="direct_purchase_limit" label="直销限额" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('distribution_purchase_limit') && <SortableHeader columnKey="distribution_purchase_limit" label="代销限额" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
@@ -371,6 +376,7 @@ export function FundOverviewPage() {
                       {visible('china_country_pct') && <td className="numeric metric-cell">{formatPercent(field(fund, 'china_country_pct'))}</td>}
                       {visible('information_technology_pct') && <td className="numeric metric-cell">{formatPercent(field(fund, 'information_technology_pct'))}</td>}
                       {visible('disclosed_top10_pct') && <td className="numeric metric-cell">{formatPercent(field(fund, 'disclosed_top10_pct'))}</td>}
+                      {visible('latest_estimated_return_pct') && <td className="q2-on-demand-column">{String(field(fund, 'wrapper_type')).toUpperCase() === 'DIRECT' ? <OnDemandEstimateCell fund={fund} /> : <span className="metric-cell">不适用</span>}</td>}
                       {visible('latest_nav_return_pct') && <td className={`numeric metric-cell ${returnTone(field(fund, 'latest_nav_return_pct'))}`}>{signedPercent(field(fund, 'latest_nav_return_pct'))}</td>}
                       {visible('direct_purchase_limit') && <td><LimitCell limit={fund.direct_purchase_limit} /></td>}
                       {visible('distribution_purchase_limit') && <td><LimitCell limit={fund.distribution_purchase_limit} /></td>}
@@ -390,7 +396,7 @@ export function FundOverviewPage() {
           </div>
         )}
         {selected.length >= 5 && <p className="inline-note">已达到 5 只对比上限；取消一只后可重新选择。</p>}
-        {fundsQuery.isSuccess && funds.length > 0 && <p className="table-footnote">涨跌幅优先采用基金公司公布值，缺失时使用相邻净值计算值；限额为代表份额最新日快照。报告状态“{statusLabel('valid_empty')}”只代表报告明确披露空表。</p>}
+        {fundsQuery.isSuccess && funds.length > 0 && <p className="table-footnote">“最新预估涨幅”采用 Q2 披露持仓基线，仅在点击单只基金后计算，不会自动扫描全部基金；“最新涨跌幅”优先采用基金公司公布值，缺失时使用相邻净值计算值。报告状态“{statusLabel('valid_empty')}”只代表报告明确披露空表。</p>}
       </section>
     </div>
   )

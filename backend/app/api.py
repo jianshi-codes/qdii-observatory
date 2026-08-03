@@ -62,6 +62,17 @@ from backend.app.operation_queue import (
     enqueue_operation,
     latest_operation,
 )
+from backend.app.q2_analysis import ANALYSIS_START_DATE, MODEL_NAME
+from backend.app.q2_analysis.consistency import ConsistencyRules, evaluate_consistency
+from backend.app.q2_analysis.market_provider import YahooChartMarketProvider
+from backend.app.q2_analysis.portfolio_review import analyze_fund
+from backend.app.q2_analysis.predictor import load_consistency_rule_values
+from backend.app.q2_analysis.scope import (
+    AnalysisScopeError,
+    AnalysisTarget,
+    select_explicit_active_fund,
+    validate_analysis_dates,
+)
 from backend.app.schemas import (
     AllocationItemRead,
     CompareFundExposureRead,
@@ -107,6 +118,7 @@ from backend.app.schemas import (
     PurchaseLimitRead,
     PurchaseLimitsRead,
     PurchaseLimitSummaryRead,
+    Q2FundAnalysisRead,
     ResearchScopeChoiceRead,
     ReturnCorrelationRead,
     SecurityHoldingRead,
@@ -573,6 +585,118 @@ def archive_fund(fund_id: int, db: DbSession) -> FundUniverseStateRead:
     fund.is_user_selected = False
     db.commit()
     return FundUniverseStateRead.model_validate(fund)
+
+
+def _not_applicable_estimate(
+    db: Session,
+    fund: FundContract,
+    share: FundShare,
+    *,
+    start_date: date,
+    as_of: date,
+) -> Q2FundAnalysisRead:
+    report = db.scalar(
+        select(FundReport)
+        .where(
+            FundReport.fund_contract_id == fund.id,
+            FundReport.report_type == "QUARTERLY",
+            FundReport.report_year == 2026,
+            FundReport.report_quarter == 2,
+        )
+        .order_by(FundReport.period_end.desc(), FundReport.id.desc())
+        .limit(1)
+    )
+    latest_nav_date = db.scalar(
+        select(func.max(DailyFundNav.nav_date)).where(
+            DailyFundNav.fund_share_id == share.id,
+            DailyFundNav.nav_date >= start_date,
+            DailyFundNav.nav_date <= as_of,
+        )
+    )
+    consistency = evaluate_consistency(
+        [],
+        ConsistencyRules.from_mapping(load_consistency_rule_values()),
+        not_applicable=True,
+    )
+    return Q2FundAnalysisRead.model_validate(
+        {
+            "fund_id": fund.id,
+            "fund_code": share.share_code,
+            "representative_code": fund.representative_code,
+            "fund_name": fund.canonical_name,
+            "share_code": share.share_code,
+            "share_currency": share.currency,
+            "data_as_of": latest_nav_date or (report.period_end if report else as_of),
+            "market_data_fetched_at": None,
+            "report_period_end": report.period_end if report else None,
+            "report_public_available_at": report.public_available_at if report else None,
+            "analysis_start_date": start_date,
+            "as_of": as_of,
+            "analysis_mode": None,
+            "model": MODEL_NAME,
+            "prediction": None,
+            "latest_comparison": None,
+            "consistency": consistency.as_dict(),
+            "coverage": None,
+            "prediction_observation_coverage_pct": None,
+            "proxies": [],
+            "unmapped_securities": [],
+            "limitations": [consistency.explanation],
+            "sources": [],
+            "market_data_errors": [],
+            "series": [],
+        }
+    )
+
+
+@router.get("/funds/{fund_id}/today-estimate", response_model=Q2FundAnalysisRead)
+def get_fund_today_estimate(
+    fund_id: int,
+    db: DbSession,
+    share_code: str | None = None,
+    start_date: date = ANALYSIS_START_DATE,
+    as_of: date | None = None,
+    refresh_market_data: bool = False,
+) -> Q2FundAnalysisRead:
+    resolved_as_of = as_of or date.today()
+    try:
+        validate_analysis_dates(start_date, resolved_as_of)
+    except AnalysisScopeError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    fund = _get_fund(db, fund_id)
+    selected_code = share_code or fund.representative_code
+    share = db.scalar(
+        select(FundShare).where(
+            FundShare.fund_contract_id == fund.id,
+            FundShare.share_code == selected_code,
+        )
+    )
+    if share is None:
+        raise HTTPException(status_code=404, detail="Share code not found for this fund")
+    if (fund.wrapper_type or "").upper() != "DIRECT":
+        return _not_applicable_estimate(
+            db,
+            fund,
+            share,
+            start_date=start_date,
+            as_of=resolved_as_of,
+        )
+
+    try:
+        target: AnalysisTarget = select_explicit_active_fund(db, share.share_code)
+    except AnalysisScopeError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    with ProviderHttpClient() as http:
+        result = analyze_fund(
+            db,
+            target,
+            YahooChartMarketProvider(http),
+            start_date=start_date,
+            as_of=resolved_as_of,
+            refresh_market_data=refresh_market_data,
+        )
+    return Q2FundAnalysisRead.model_validate(result.as_dict(include_series=False))
 
 
 @router.get("/fund-catalog/options", response_model=FundCatalogOptionsRead)

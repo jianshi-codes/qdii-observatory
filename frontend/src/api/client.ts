@@ -24,6 +24,7 @@ import type {
   PublicFundCandidate,
   PublicFundImportResult,
   SecurityHolding,
+  TodayEstimatePayload,
 } from './types'
 
 const configuredBase = import.meta.env.VITE_API_BASE_URL?.trim()
@@ -151,6 +152,19 @@ export const api = {
     request<FundUniverseState>(`/api/funds/${encodeURIComponent(id)}/archive`, signal, {
       method: 'POST',
     }),
+  fundTodayEstimate: (
+    id: string,
+    options: { shareCode?: string } = {},
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams()
+    if (options.shareCode) query.set('share_code', options.shareCode)
+    const suffix = query.size ? `?${query.toString()}` : ''
+    return request<TodayEstimatePayload>(
+      `/api/funds/${encodeURIComponent(id)}/today-estimate${suffix}`,
+      signal,
+    )
+  },
   fund: (id: string, signal?: AbortSignal) =>
     request<FundDetail>(`/api/funds/${encodeURIComponent(id)}`, signal),
   shares: (id: string, signal?: AbortSignal) =>

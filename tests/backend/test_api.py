@@ -943,6 +943,142 @@ def test_archive_fund_preserves_data_and_updates_active_universe_counts(
     assert archived.shares
 
 
+def test_today_estimate_is_not_applicable_to_exchange_traded_funds(
+    client: TestClient,
+    seeded: dict[str, int],
+) -> None:
+    response = client.get(f"/api/funds/{seeded['target']}/today-estimate?as_of=2026-08-03")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["prediction"] is None
+    assert payload["consistency"]["status"] == "NOT_APPLICABLE"
+
+
+def test_today_estimate_runs_only_for_one_explicit_direct_fund(
+    client: TestClient,
+    db_session: Session,
+    seeded: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fund = db_session.get(FundContract, seeded["feeder"])
+    assert fund is not None
+    fund.wrapper_type = "DIRECT"
+    report = fund.reports[0]
+    db_session.add(
+        ReportSecurityHolding(
+            fund_report_id=report.id,
+            security_code_raw="NVDA US",
+            security_name_raw="NVIDIA CORP",
+            security_name_normalized="NVIDIA",
+            market_normalized="US",
+            currency="USD",
+            security_type="EQUITY",
+            exposure_basis="DIRECT",
+            nav_pct=Decimal("8"),
+            rank=1,
+            source_section="前十名股票",
+            raw_row={"ticker": "NVDA"},
+        )
+    )
+    db_session.commit()
+    captured: dict[str, object] = {}
+
+    class Result:
+        def as_dict(self, *, include_series: bool) -> dict[str, object]:
+            captured["include_series"] = include_series
+            return {
+                "fund_id": fund.id,
+                "fund_code": "000834",
+                "representative_code": "000834",
+                "fund_name": fund.canonical_name,
+                "share_code": "000834",
+                "share_currency": "CNY",
+                "data_as_of": date(2026, 7, 31),
+                "market_data_fetched_at": datetime(2026, 8, 3, tzinfo=UTC),
+                "report_period_end": date(2026, 6, 30),
+                "report_public_available_at": datetime(2026, 7, 20, tzinfo=UTC),
+                "analysis_start_date": date(2026, 7, 1),
+                "as_of": date(2026, 8, 3),
+                "analysis_mode": "Q2_LIVE",
+                "model": "Q2_DISCLOSED_HOLDINGS_BASELINE",
+                "prediction": {
+                    "estimate_date": date(2026, 8, 3),
+                    "nav_date": date(2026, 7, 31),
+                    "actual_return_pct": None,
+                    "actual_return_source": None,
+                    "predicted_return_pct": Decimal("0.8"),
+                    "lower_bound_pct": Decimal("0.2"),
+                    "upper_bound_pct": Decimal("1.4"),
+                    "known_contribution_pct": Decimal("0.8"),
+                    "proxy_contribution_pct": None,
+                    "fund_holding_contribution_pct": None,
+                    "cash_contribution_pct": Decimal("0"),
+                    "residual_pct": None,
+                    "analysis_mode": "Q2_LIVE",
+                    "confidence": "MEDIUM",
+                    "coverage": {
+                        "disclosed_security_weight_pct": Decimal("8"),
+                        "mapped_security_weight_pct": Decimal("8"),
+                        "priced_security_weight_pct": Decimal("8"),
+                        "unresolved_security_weight_pct": Decimal("0"),
+                        "missing_market_data_weight_pct": Decimal("0"),
+                        "undisclosed_equity_weight_pct": Decimal("86"),
+                        "proxy_weight_pct": Decimal("0"),
+                        "fund_holding_weight_pct": Decimal("0"),
+                        "resolved_fund_holding_weight_pct": Decimal("0"),
+                        "unresolved_fund_weight_pct": Decimal("0"),
+                        "cash_weight_pct": Decimal("6"),
+                        "total_explained_weight_pct": Decimal("14"),
+                    },
+                    "security_contributions": [],
+                    "proxy_contributions": [],
+                    "fund_holding_contributions": [],
+                    "model": "Q2_DISCLOSED_HOLDINGS_BASELINE",
+                },
+                "latest_comparison": None,
+                "consistency": {
+                    "status": "INSUFFICIENT_DATA",
+                    "observation_count": 1,
+                    "mae_5_pct": None,
+                    "mae_10_pct": None,
+                    "mae_20_pct": None,
+                    "signed_bias_5_pct": None,
+                    "signed_bias_10_pct": None,
+                    "cumulative_residual_pct": None,
+                    "actual_predicted_correlation": None,
+                    "same_direction_residual_streak": 0,
+                    "recent_coverage_pct": Decimal("14"),
+                    "explanation": "insufficient data",
+                },
+                "coverage": None,
+                "prediction_observation_coverage_pct": Decimal("14"),
+                "proxies": [],
+                "unmapped_securities": [],
+                "limitations": [],
+                "sources": [],
+                "market_data_errors": [],
+                "series": [],
+            }
+
+    def fake_analyze(*args: object, **kwargs: object) -> Result:
+        captured["target"] = args[1]
+        captured["as_of"] = kwargs["as_of"]
+        return Result()
+
+    monkeypatch.setattr(api_module, "analyze_fund", fake_analyze)
+
+    response = client.get(
+        f"/api/funds/{fund.id}/today-estimate?share_code=000834&as_of=2026-08-03"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["prediction"]["predicted_return_pct"] == "0.8"
+    assert captured["target"].fund_id == fund.id
+    assert captured["as_of"] == date(2026, 8, 3)
+    assert captured["include_series"] is False
+
+
 def test_data_operation_rejects_unknown_fund_and_concurrent_run(
     client: TestClient,
     seeded: dict[str, int],
