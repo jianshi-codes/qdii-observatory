@@ -120,16 +120,30 @@ export function reportTypeLabel(value: unknown): string {
 
 export function issueTone(value: unknown): 'good' | 'warn' | 'bad' | 'neutral' {
   const normalized = String(value ?? '').toLowerCase()
-  if (['success', 'succeeded', 'parsed', 'valid_empty', 'completed', 'resolved', 'closed'].includes(normalized)) {
+  if (['success', 'succeeded', 'parsed', 'valid_empty', 'completed', 'resolved', 'direct_only', 'closed'].includes(normalized)) {
     return 'good'
   }
   if (['warning', 'low_confidence', 'partial', 'queued', 'running', 'pending', 'unresolved', 'open'].includes(normalized)) {
     return 'warn'
   }
-  if (['error', 'failed', 'failed_with_reason', 'critical', 'high'].includes(normalized)) {
+  if (['error', 'failed', 'failed_with_reason', 'circular_relation_detected', 'critical', 'high'].includes(normalized)) {
     return 'bad'
   }
   return 'neutral'
+}
+
+export function lookthroughStatusLabel(value: unknown): string {
+  const normalized = String(value ?? '').toLowerCase()
+  const labels: Record<string, string> = {
+    resolved: '已完成穿透',
+    direct_only: '仅直接持仓',
+    partial: '部分穿透',
+    unresolved: '待解决穿透',
+    not_calculated: '尚未计算',
+    not_available: '不可用',
+    circular_relation_detected: '检测到循环关系',
+  }
+  return labels[normalized] ?? (value ? String(value) : '状态未知')
 }
 
 export function statusLabel(value: unknown): string {

@@ -34,6 +34,10 @@ export interface FundSummary {
   report_status?: string | null
   latest_report_status?: string | null
   latest_report_period_end?: string | null
+  parse_confidence?: number | string | null
+  stock_holding_count?: number
+  fund_holding_count?: number
+  lookthrough_status?: string
   latest_nav_date?: string | null
   latest_nav_return_pct?: number | string | null
   direct_purchase_limit?: PurchaseLimitSummary | null

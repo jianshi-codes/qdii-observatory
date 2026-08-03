@@ -117,18 +117,18 @@ def build_coverage_rows(
     report_by_fund = {report.fund_contract_id: report for report in reports}
     report_ids = [report.id for report in reports]
 
-    direct_country_counts = _row_counts(
+    direct_country_counts = report_row_counts(
         session, ReportCountryAllocation, report_ids, basis="DIRECT"
     )
-    direct_industry_counts = _row_counts(
+    direct_industry_counts = report_row_counts(
         session, ReportIndustryAllocation, report_ids, basis="DIRECT"
     )
-    stock_counts = _row_counts(session, ReportSecurityHolding, report_ids, basis="DIRECT")
-    fund_counts = _row_counts(session, ReportFundHolding, report_ids, basis="DIRECT")
-    lookthrough_country_counts = _row_counts(
+    stock_counts = report_row_counts(session, ReportSecurityHolding, report_ids, basis="DIRECT")
+    fund_counts = report_row_counts(session, ReportFundHolding, report_ids, basis="DIRECT")
+    lookthrough_country_counts = report_row_counts(
         session, ReportCountryAllocation, report_ids, basis="LOOKTHROUGH"
     )
-    lookthrough_industry_counts = _row_counts(
+    lookthrough_industry_counts = report_row_counts(
         session, ReportIndustryAllocation, report_ids, basis="LOOKTHROUGH"
     )
     metrics_by_report = {
@@ -162,7 +162,7 @@ def build_coverage_rows(
                 direct_industry_available=direct_industry_counts.get(report_id, 0) > 0,
                 stock_holding_count=stock_counts.get(report_id, 0),
                 fund_holding_count=fund_holding_count,
-                lookthrough_status=_lookthrough_status(
+                lookthrough_status=lookthrough_status(
                     status=status,
                     fund_holding_count=fund_holding_count,
                     lookthrough_row_count=(
@@ -267,7 +267,7 @@ def render_coverage_markdown(rows: tuple[CoverageRow, ...], year: int, quarter: 
     return "\n".join(lines) + "\n"
 
 
-def _row_counts(
+def report_row_counts(
     session: Session,
     model: type[
         ReportCountryAllocation
@@ -338,7 +338,7 @@ def _failure_reason(report: FundReport | None, status: str, year: int, quarter: 
     return f"Report status is {status}."
 
 
-def _lookthrough_status(
+def lookthrough_status(
     *,
     status: str,
     fund_holding_count: int,

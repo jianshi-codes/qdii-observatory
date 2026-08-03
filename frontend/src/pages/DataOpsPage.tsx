@@ -39,6 +39,7 @@ import {
   formatConfidence,
   formatDate,
   issueTone,
+  lookthroughStatusLabel,
   statusLabel,
   toNumber,
 } from '../lib/format'
@@ -370,7 +371,7 @@ export function DataOpsPage() {
                   <td>{formatConfidence(field(fund, 'parse_confidence'))}</td>
                   <td>{displayText(field(fund, 'stock_holding_count'), '—')}</td>
                   <td>{displayText(field(fund, 'fund_holding_count'), '—')}</td>
-                  <td><StatusBadge value={field(fund, 'lookthrough_status')} /></td>
+                  <td><StatusBadge value={field(fund, 'lookthrough_status')} label={lookthroughStatusLabel(field(fund, 'lookthrough_status'))} /></td>
                   <td>{formatDate(field(fund, 'latest_nav_date'))}</td>
                   <td>
                     <button

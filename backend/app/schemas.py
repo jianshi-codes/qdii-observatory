@@ -159,6 +159,10 @@ class FundSummaryRead(ApiModel):
     latest_report_id: int | None = None
     latest_report_status: str | None = None
     latest_report_period_end: date | None = None
+    parse_confidence: Decimal | None = None
+    stock_holding_count: int = 0
+    fund_holding_count: int = 0
+    lookthrough_status: str = "not_available"
     latest_nav_date: date | None = None
     latest_nav_return_pct: Decimal | None = None
     us_country_pct: Decimal | None = None

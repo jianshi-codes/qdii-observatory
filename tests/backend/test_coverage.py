@@ -14,6 +14,7 @@ from backend.app.coverage import (
     CoverageError,
     build_coverage_rows,
     generate_coverage,
+    lookthrough_status,
 )
 from backend.app.models import (
     FundContract,
@@ -194,3 +195,34 @@ def test_coverage_has_one_explicit_deterministic_row_per_selected_fund(
 def test_coverage_requires_at_least_one_enabled_fund(db_session: Session) -> None:
     with pytest.raises(CoverageError, match="at least one"):
         build_coverage_rows(db_session, year=2026, quarter=2)
+
+
+@pytest.mark.parametrize(
+    ("fund_holding_count", "lookthrough_rows", "coverage", "unresolved", "expected"),
+    [
+        (0, 0, None, None, "direct_only"),
+        (1, 2, Decimal("80"), Decimal("20"), "partial"),
+        (1, 0, Decimal("0"), Decimal("100"), "unresolved"),
+    ],
+)
+def test_lookthrough_status_distinguishes_coverage_states(
+    fund_holding_count: int,
+    lookthrough_rows: int,
+    coverage: Decimal | None,
+    unresolved: Decimal | None,
+    expected: str,
+) -> None:
+    metrics = None
+    if coverage is not None:
+        metrics = ReportDerivedMetrics(
+            fund_report_id=1,
+            lookthrough_coverage_pct=coverage,
+            unresolved_fund_weight_pct=unresolved,
+        )
+
+    assert lookthrough_status(
+        status="parsed",
+        fund_holding_count=fund_holding_count,
+        lookthrough_row_count=lookthrough_rows,
+        metrics=metrics,
+    ) == expected

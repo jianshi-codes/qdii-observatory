@@ -16,6 +16,7 @@ from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from backend.app.coverage import lookthrough_status, report_row_counts
 from backend.app.data_operations import (
     NoSelectedFundsError,
     UnknownFundCodesError,
@@ -322,6 +323,16 @@ def _fund_summaries(db: Session, funds: list[FundContract]) -> list[FundSummaryR
     report_ids = [report.id for report in reports.values()]
     countries_by_report = _country_percentages(db, report_ids)
     limits_by_fund = _representative_purchase_limits(db, funds)
+    stock_counts = report_row_counts(
+        db, ReportSecurityHolding, report_ids, basis="DIRECT"
+    )
+    fund_counts = report_row_counts(db, ReportFundHolding, report_ids, basis="DIRECT")
+    lookthrough_country_counts = report_row_counts(
+        db, ReportCountryAllocation, report_ids, basis="LOOKTHROUGH"
+    )
+    lookthrough_industry_counts = report_row_counts(
+        db, ReportIndustryAllocation, report_ids, basis="LOOKTHROUGH"
+    )
     metrics_by_report: dict[int, ReportDerivedMetrics] = {}
     if report_ids:
         metrics_by_report = {
@@ -336,6 +347,7 @@ def _fund_summaries(db: Session, funds: list[FundContract]) -> list[FundSummaryR
     result: list[FundSummaryRead] = []
     for fund in funds:
         report = reports.get(fund.id)
+        report_id = report.id if report else 0
         metrics = metrics_by_report.get(report.id) if report else None
         nav = nav_rows.get(fund.id)
         countries = countries_by_report.get(report.id, {}) if report else {}
@@ -364,6 +376,20 @@ def _fund_summaries(db: Session, funds: list[FundContract]) -> list[FundSummaryR
                 latest_report_id=report.id if report else None,
                 latest_report_status=report.parse_status if report else None,
                 latest_report_period_end=report.period_end if report else None,
+                parse_confidence=report.parse_confidence if report else None,
+                stock_holding_count=stock_counts.get(report_id, 0),
+                fund_holding_count=fund_counts.get(report_id, 0),
+                lookthrough_status=lookthrough_status(
+                    status=(report.parse_status or "").strip().lower()
+                    if report
+                    else "unresolved",
+                    fund_holding_count=fund_counts.get(report_id, 0),
+                    lookthrough_row_count=(
+                        lookthrough_country_counts.get(report_id, 0)
+                        + lookthrough_industry_counts.get(report_id, 0)
+                    ),
+                    metrics=metrics,
+                ),
                 latest_nav_date=nav.nav_date if nav else None,
                 latest_nav_return_pct=(
                     nav.published_daily_return_pct

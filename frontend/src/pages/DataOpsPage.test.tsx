@@ -54,8 +54,8 @@ describe('DataOpsPage purchase-limit coverage', () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const path = String(input)
       if (path === '/api/funds') return response({ items: [
-        { id: 1, canonical_name: '基金一', manager_name: '公司一', representative_code: '000001' },
-        { id: 2, canonical_name: '基金二', manager_name: '公司二', representative_code: '000002' },
+        { id: 1, canonical_name: '基金一', manager_name: '公司一', representative_code: '000001', parse_confidence: '0.9100', stock_holding_count: 10, fund_holding_count: 2, lookthrough_status: 'partial' },
+        { id: 2, canonical_name: '基金二', manager_name: '公司二', representative_code: '000002', parse_confidence: '0.7800', stock_holding_count: 8, fund_holding_count: 0, lookthrough_status: 'direct_only' },
       ] })
       if (path === '/api/ingestion-runs') return response({ items: [] })
       if (path === '/api/data-quality-issues') return response({ items: [{
@@ -98,6 +98,9 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(screen.getByText('可售状态未知')).toBeInTheDocument()
     expect(screen.getByText('该渠道未销售')).toBeInTheDocument()
     expect(screen.getByText('不适用')).toBeInTheDocument()
+    expect(screen.getByText('91.0%')).toBeInTheDocument()
+    expect(screen.getByText('部分穿透')).toBeInTheDocument()
+    expect(screen.getByText('仅直接持仓')).toBeInTheDocument()
     expect(screen.getByText('有限额')).toBeInTheDocument()
     expect(screen.getByText('不限额')).toBeInTheDocument()
     expect(screen.getByText('限额未知')).toBeInTheDocument()

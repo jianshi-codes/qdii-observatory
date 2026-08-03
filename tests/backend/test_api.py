@@ -530,6 +530,10 @@ def test_all_fund_read_endpoints(client: TestClient, seeded: dict[str, int]) -> 
     }
     assert responses["funds"].json()["items"][0]["latest_report_status"] == "PARSED"
     summary = responses["funds"].json()["items"][0]
+    assert summary["parse_confidence"] == "0.9900"
+    assert summary["stock_holding_count"] == 1
+    assert summary["fund_holding_count"] == 1
+    assert summary["lookthrough_status"] == "resolved"
     assert summary["latest_nav_date"] == "2026-07-30"
     assert summary["latest_nav_return_pct"] == "0.75000000"
     assert summary["korea_country_pct"] == "3.00000000"
