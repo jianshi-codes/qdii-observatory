@@ -25,13 +25,63 @@ describe('PortfolioPage', () => {
   afterEach(cleanup)
 
   it('shows currency-separated valuation, dividends, recurring investment, and fees', async () => {
-    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
-      if (String(input).includes('/api/portfolio/capability')) {
+    let portfolioRequests = 0
+    let refreshSubmitted = false
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/api/portfolio/capability')) {
         return response({
           enabled: true,
           template_url: '/templates/portfolio-import-template.xlsx',
         })
       }
+      if (url.includes('/api/operations/preparation-status')) {
+        return response({
+          active_operation: null,
+          latest_operation: refreshSubmitted ? {
+            id: 41,
+            operation: 'sync-daily',
+            status: 'succeeded',
+            fund_codes: ['123456', '654321'],
+            lookback_days: 10,
+            report_year: 2026,
+            report_quarter: 2,
+            current_stage: null,
+            stage_completed: 1,
+            stage_total: 1,
+            run_ids: [9],
+            records_written: 12,
+            records_failed: 0,
+            created_at: '2026-08-03T08:00:00Z',
+            started_at: '2026-08-03T08:00:01Z',
+            finished_at: '2026-08-03T08:00:03Z',
+            error_message: null,
+          } : null,
+        })
+      }
+      if (url.includes('/api/operations/sync-daily')) {
+        refreshSubmitted = true
+        return response({
+          id: 41,
+          operation: 'sync-daily',
+          status: 'queued',
+          fund_codes: ['123456', '654321'],
+          lookback_days: 10,
+          report_year: 2026,
+          report_quarter: 2,
+          current_stage: null,
+          stage_completed: 0,
+          stage_total: 1,
+          run_ids: [],
+          records_written: 0,
+          records_failed: 0,
+          created_at: '2026-08-03T08:00:00Z',
+          started_at: null,
+          finished_at: null,
+          error_message: null,
+        })
+      }
+      portfolioRequests += 1
       return response({
       latest_nav_date: '2026-07-30',
       currency_summaries: [
@@ -152,7 +202,8 @@ describe('PortfolioPage', () => {
         source_url: 'https://example.test/fx',
       },
       })
-    }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     renderPage()
 
@@ -171,10 +222,19 @@ describe('PortfolioPage', () => {
     expect(screen.getAllByRole('row')[1]).toHaveTextContent('测试美元基金')
     fireEvent.click(screen.getByRole('button', { name: /参考市值/ }))
     expect(screen.getAllByRole('row')[1]).toHaveTextContent('测试全球基金')
-    expect(screen.getByText(/不会自动记为已成交/)).toBeInTheDocument()
+    expect(screen.getByText(/重新加载 1 个定投计划，不推定真实成交/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /下载 XLSX 模板/ })).toHaveAttribute(
       'href',
       '/templates/portfolio-import-template.xlsx',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '刷新净值与 1 个定投' }))
+    expect(await screen.findByText(/任务 #41：成功/)).toBeInTheDocument()
+    await waitFor(() => expect(portfolioRequests).toBeGreaterThanOrEqual(2))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/operations/sync-daily',
+      expect.objectContaining({
+        body: JSON.stringify({ fund_codes: ['123456', '654321'], lookback_days: 10 }),
+      }),
     )
   })
 
@@ -227,6 +287,9 @@ describe('PortfolioPage', () => {
           universe_restored: ['006373'],
           nav_synced: [],
         })
+      }
+      if (url.includes('/api/operations/preparation-status')) {
+        return response({ active_operation: null, latest_operation: null })
       }
       if (url.endsWith('/api/portfolio')) {
         portfolioRequests += 1

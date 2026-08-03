@@ -12,7 +12,7 @@ import {
   Upload,
   WalletCards,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type {
@@ -21,7 +21,7 @@ import type {
   PortfolioPosition,
 } from '../api/types'
 import { EmptyPanel, ErrorPanel, LoadingPanel } from '../components/StatePanel'
-import { formatDate, formatPercent, toNumber } from '../lib/format'
+import { formatDate, formatPercent, statusLabel, toNumber } from '../lib/format'
 
 function currencySymbol(currency: string): string {
   return currency === 'CNY' ? '¥' : currency === 'USD' ? '$' : `${currency} `
@@ -257,6 +257,8 @@ function SortableHeader({
 }
 
 export function PortfolioPage() {
+  const queryClient = useQueryClient()
+  const refreshedOperationRef = useRef<string | number | null>(null)
   const [sort, setSort] = useState<{ key: SortKey | null; direction: SortDirection }>({
     key: null,
     direction: 'desc',
@@ -271,11 +273,38 @@ export function PortfolioPage() {
     queryFn: ({ signal }) => api.portfolio(signal),
     enabled: portfolioEnabled,
   })
+  const preparationQuery = useQuery({
+    queryKey: ['data-preparation-status'],
+    queryFn: ({ signal }) => api.dataPreparationStatus(signal),
+    enabled: portfolioEnabled,
+    refetchInterval: (query) => {
+      const status = query.state.data?.latest_operation?.status
+      return status === 'queued' || status === 'running' ? 2_000 : false
+    },
+  })
+  const refreshMutation = useMutation({
+    mutationFn: (fundCodes: string[]) => api.runDataOperation('sync-daily', fundCodes),
+    onSuccess: async () => {
+      await preparationQuery.refetch()
+    },
+  })
   const portfolio = portfolioQuery.data
   const positions = useMemo(() => portfolio?.positions ?? [], [portfolio])
   const cny = summaryFor(portfolio?.currency_summaries ?? [], 'CNY')
   const usd = summaryFor(portfolio?.currency_summaries ?? [], 'USD')
   const recurringCount = positions.filter((position) => position.recurring_plan).length
+  const persistedOperation = preparationQuery.data?.latest_operation
+  const submittedOperation = refreshMutation.data
+  const refreshOperation = submittedOperation && persistedOperation?.id === submittedOperation.id
+    ? persistedOperation
+    : submittedOperation
+  const globalOperationActive = persistedOperation?.status === 'queued'
+    || persistedOperation?.status === 'running'
+  const refreshOperationActive = refreshOperation?.status === 'queued'
+    || refreshOperation?.status === 'running'
+  const anotherOperationActive = globalOperationActive && !refreshOperationActive
+  const refreshBusy = preparationQuery.isPending || refreshMutation.isPending
+    || globalOperationActive || refreshOperationActive
   const sortedPositions = useMemo(() => {
     if (!sort.key) return positions
     return [...positions].sort((left, right) => {
@@ -288,6 +317,17 @@ export function PortfolioPage() {
       return sort.direction === 'asc' ? difference : -difference
     })
   }, [positions, sort])
+
+  useEffect(() => {
+    if (!refreshOperation || refreshOperationActive) return
+    if (refreshedOperationRef.current === refreshOperation.id) return
+    refreshedOperationRef.current = refreshOperation.id
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+      queryClient.invalidateQueries({ queryKey: ['funds'] }),
+      queryClient.invalidateQueries({ queryKey: ['data-preparation-status'] }),
+    ])
+  }, [queryClient, refreshOperation, refreshOperationActive])
 
   function toggleSort(key: SortKey) {
     setSort((current) => ({
@@ -311,7 +351,38 @@ export function PortfolioPage() {
           <RefreshCw size={18} />
           <span>最新净值日</span>
           <strong>{formatDate(portfolio?.latest_nav_date)}</strong>
-          <small>运行 make sync-qdii-daily 后自动刷新；定投计划不会自动记为已成交。</small>
+          <button
+            className="portfolio-data-refresh"
+            type="button"
+            disabled={positions.length === 0 || refreshBusy}
+            onClick={() => refreshMutation.mutate([...new Set(positions.map((position) => position.share_code))])}
+          >
+            <RefreshCw size={13} className={refreshBusy ? 'spin' : ''} />
+            {preparationQuery.isPending
+              ? '正在检查任务…'
+              : anotherOperationActive
+                ? '其他数据任务运行中'
+                : refreshMutation.isPending || refreshOperationActive
+              ? '正在刷新…'
+              : recurringCount > 0
+                ? `刷新净值与 ${recurringCount} 个定投`
+                : '刷新最新净值'}
+          </button>
+          <small>
+            {recurringCount > 0
+              ? `同步近 10 天净值、价格、限额与汇率；完成后重新加载 ${recurringCount} 个定投计划，不推定真实成交。`
+              : '同步近 10 天净值、价格、限额与汇率；完成后自动刷新本页。'}
+          </small>
+          {refreshOperation && !refreshOperationActive && (
+            <small className={`portfolio-refresh-result tone-${refreshOperation.status}`} role="status">
+              任务 #{refreshOperation.id}：{statusLabel(refreshOperation.status)} · 写入 {refreshOperation.records_written} · 失败 {refreshOperation.records_failed}
+            </small>
+          )}
+          {refreshMutation.isError && (
+            <small className="portfolio-refresh-error" role="alert">
+              {refreshMutation.error instanceof Error ? refreshMutation.error.message : '刷新任务提交失败'}
+            </small>
+          )}
         </div>
       </section>
 
