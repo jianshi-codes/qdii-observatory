@@ -82,6 +82,14 @@ def test_initial_migration_up_and_down_on_sqlite(tmp_path, monkeypatch) -> None:
     assert {"base_currency", "quote_currency", "rate_date", "rate"} <= {
         column["name"] for column in inspector.get_columns("daily_exchange_rate")
     }
+    assert {
+        "operation",
+        "status",
+        "active_slot",
+        "fund_codes",
+        "current_stage",
+        "run_ids",
+    } <= {column["name"] for column in inspector.get_columns("data_operation")}
 
     command.downgrade(config, "base")
     assert inspect(engine).get_table_names() == ["alembic_version"]

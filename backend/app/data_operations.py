@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from threading import Lock
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -37,10 +34,6 @@ from backend.app.models import (
 )
 
 
-class OperationInProgressError(RuntimeError):
-    """A provider-backed data operation is already running in this process."""
-
-
 class NoSelectedFundsError(RuntimeError):
     """The operation requires at least one imported user fund."""
 
@@ -64,8 +57,8 @@ class DataOperationResult:
 
 @dataclass(frozen=True, slots=True)
 class DataPreparationStatus:
-    active_operation: str | None
     total_funds: int
+    total_shares: int
     nav_ready_funds: int
     latest_nav_date: date | None
     limit_ready_funds: int
@@ -75,32 +68,6 @@ class DataPreparationStatus:
     report_downloaded_funds: int
     report_parsed_funds: int
     lookthrough_ready_funds: int
-
-
-_OPERATION_LOCK = Lock()
-_OPERATION_STATE_LOCK = Lock()
-_ACTIVE_OPERATION: str | None = None
-
-
-@contextmanager
-def operation_guard(operation: str = "data-operation") -> Iterator[None]:
-    global _ACTIVE_OPERATION
-
-    if not _OPERATION_LOCK.acquire(blocking=False):
-        raise OperationInProgressError("another data operation is already running")
-    with _OPERATION_STATE_LOCK:
-        _ACTIVE_OPERATION = operation
-    try:
-        yield
-    finally:
-        with _OPERATION_STATE_LOCK:
-            _ACTIVE_OPERATION = None
-        _OPERATION_LOCK.release()
-
-
-def active_operation() -> str | None:
-    with _OPERATION_STATE_LOCK:
-        return _ACTIVE_OPERATION
 
 
 def latest_completed_quarter(today: date | None = None) -> tuple[int, int]:
@@ -115,20 +82,24 @@ def selected_fund_codes(
     session: Session,
     requested_codes: set[str] | None = None,
 ) -> tuple[str, ...]:
-    available = set(
-        session.scalars(
-            select(FundContract.representative_code).where(
-                FundContract.is_user_selected.is_(True)
-            )
-        ).all()
-    )
+    rows = session.execute(
+        select(FundContract.representative_code, FundShare.share_code)
+        .join(FundShare, FundShare.fund_contract_id == FundContract.id)
+        .where(FundContract.is_user_selected.is_(True))
+    ).all()
+    code_to_representative = {
+        code: representative
+        for representative, share_code in rows
+        for code in (representative, share_code)
+    }
+    available = set(code_to_representative.values())
     if not available:
         raise NoSelectedFundsError("import at least one fund before preparing data")
     if requested_codes:
-        missing = requested_codes - available
+        missing = requested_codes - code_to_representative.keys()
         if missing:
             raise UnknownFundCodesError(missing)
-        return tuple(sorted(requested_codes))
+        return tuple(sorted({code_to_representative[code] for code in requested_codes}))
     return tuple(sorted(available))
 
 
@@ -153,9 +124,7 @@ def sync_daily_data(
     lookback_days: int = 10,
 ) -> DataOperationResult:
     share_codes = share_codes_for_funds(session, fund_codes)
-    with provider_client(
-        "eastmoney_nav", "eastmoney_market", "csrc_reports", "ecb_fx"
-    ) as http:
+    with provider_client("eastmoney_nav", "eastmoney_market", "csrc_reports", "ecb_fx") as http:
         nav_run, market_run = sync_daily(
             session,
             EastmoneyNavProvider(http),
@@ -306,6 +275,9 @@ def preparation_status(session: Session, *, today: date | None = None) -> DataPr
             select(FundContract.id).where(FundContract.is_user_selected.is_(True))
         ).all()
     )
+    total_shares = session.scalar(
+        select(func.count(FundShare.id)).where(FundShare.fund_contract_id.in_(fund_ids))
+    )
     nav_fund_ids = set(
         session.scalars(
             select(FundShare.fund_contract_id)
@@ -348,8 +320,8 @@ def preparation_status(session: Session, *, today: date | None = None) -> DataPr
         ).all()
     )
     return DataPreparationStatus(
-        active_operation=active_operation(),
         total_funds=len(fund_ids),
+        total_shares=int(total_shares or 0),
         nav_ready_funds=len(nav_fund_ids),
         latest_nav_date=session.scalar(
             select(func.max(DailyFundNav.nav_date))

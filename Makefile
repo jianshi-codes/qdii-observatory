@@ -8,8 +8,8 @@ COMPOSE ?= docker compose --env-file .env
 COMPOSE_EXTERNAL ?= docker compose --env-file .env -f compose.yaml -f compose.external.yaml
 
 .PHONY: setup init doctor docker-up docker-up-external docker-down docker-restart docker-daily docker-reset migrate dev-backend \
-	dev-frontend import-universe validate-universe demo sync-reports parse-reports sync-daily \
-	coverage analyze-fund backup restore lint typecheck test build check
+	dev-frontend dev-worker import-universe validate-universe demo sync-reports parse-reports sync-daily \
+	reconcile-public-funds coverage analyze-fund backup restore lint typecheck test build check
 
 setup:
 	$(PIP) install -e '.[dev]'
@@ -26,7 +26,7 @@ docker-up:
 
 docker-up-external:
 	$(COMPOSE_EXTERNAL) run --build --rm database-provision
-	$(COMPOSE_EXTERNAL) up --build -d backend frontend
+	$(COMPOSE_EXTERNAL) up --build -d backend worker frontend
 
 docker-down:
 	$(COMPOSE) down
@@ -47,6 +47,9 @@ migrate:
 dev-backend:
 	$(PYTHON) -m uvicorn backend.app.main:app --reload --host "$${QDII_BIND_HOST:-127.0.0.1}" --port "$${QDII_BACKEND_PORT:-8000}"
 
+dev-worker:
+	$(PYTHON) -m backend.app.operation_worker
+
 dev-frontend:
 	cd frontend && $(PNPM) dev
 
@@ -55,6 +58,9 @@ validate-universe:
 
 import-universe:
 	$(PYTHON) -m backend.app.cli import-universe --file "$(UNIVERSE)"
+
+reconcile-public-funds:
+	$(PYTHON) -m backend.app.cli reconcile-public-funds
 
 demo: import-universe
 	$(PYTHON) -m backend.app.cli load-demo

@@ -62,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
     universe.add_argument("--file", "--xlsx", dest="file", type=Path, required=True)
     universe.set_defaults(handler=_import_universe)
 
+    reconcile = subparsers.add_parser(
+        "reconcile-public-funds",
+        help="Group public A/C/currency share codes into their common fund contracts.",
+    )
+    reconcile.set_defaults(handler=_reconcile_public_funds)
+
     if _portfolio_enabled():
         portfolio = subparsers.add_parser(
             "import-portfolio", help="Import the enabled local-only Portfolio JSON snapshot."
@@ -319,6 +325,16 @@ def _import_universe(args: argparse.Namespace) -> int:
             "shares_written": shares_written,
         }
     )
+    return 0
+
+
+def _reconcile_public_funds(args: argparse.Namespace) -> int:
+    from backend.app.database import SessionLocal
+    from backend.app.ingestion.fund_grouping import reconcile_public_fund_contracts
+
+    with SessionLocal() as session:
+        result = reconcile_public_fund_contracts(session)
+    _print_json({"status": "succeeded", **asdict(result)})
     return 0
 
 

@@ -336,6 +336,7 @@ def test_metadata_contains_all_domain_tables() -> None:
         "portfolio_position",
         "portfolio_cash_flow",
         "ingestion_run",
+        "data_operation",
         "source_artifact",
         "data_quality_issue",
     }

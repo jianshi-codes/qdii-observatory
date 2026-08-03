@@ -370,18 +370,30 @@ export type DataOperationName =
   | 'parse-reports'
 
 export interface DataOperationResult {
-  operation: string
-  status: 'succeeded' | 'partial' | 'failed'
+  id: number
+  operation: DataOperationName
+  status: 'queued' | 'running' | 'succeeded' | 'partial' | 'failed'
   fund_codes: string[]
+  lookback_days: number
   report_year: number | null
   report_quarter: number | null
-  lookthrough_reports: number | null
-  runs: IngestionRun[]
+  current_stage: DataOperationName | null
+  stage_completed: number
+  stage_total: number
+  run_ids: number[]
+  records_written: number
+  records_failed: number
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  error_message: string | null
 }
 
 export interface DataPreparationStatus {
   active_operation: DataOperationName | null
+  latest_operation: DataOperationResult | null
   total_funds: number
+  total_shares: number
   nav_ready_funds: number
   latest_nav_date: string | null
   limit_ready_funds: number
@@ -403,6 +415,8 @@ export interface DataQualityIssue {
   fund_contract_id?: Identifier | null
   representative_code?: string | null
   fund_name?: string | null
+  details?: Record<string, unknown>
+  source_urls?: string[]
   created_at?: string | null
   detected_at?: string | null
   [key: string]: unknown

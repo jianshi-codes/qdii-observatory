@@ -6,6 +6,7 @@ import {
   Clock3,
   Database,
   Download,
+  ExternalLink,
   FileWarning,
   Gauge,
   History,
@@ -55,6 +56,57 @@ function issueMatches(issue: DataQualityIssue, words: string[]): boolean {
   return words.some((word) => haystack.includes(word))
 }
 
+const issuePresentation: Record<string, { label: string; guidance: string }> = {
+  REPORT_PARSE_FAILED: { label: '报告解析失败', guidance: '打开来源报告核对文件内容；修复解析规则或源文件后重新解析。' },
+  REPORT_SOURCE_MISSING: { label: '缺少可解析的报告文件', guidance: '先重新获取报告；若公开页面已有文件，可通过来源链接核对。' },
+  REPORT_SYNC_FAILED: { label: '报告获取失败', guidance: '检查公开来源是否可访问，然后重试报告同步。' },
+  REPORT_NOT_DISCOVERED: { label: '未发现对应季度报告', guidance: '确认报告是否已公开，或通过基金详情中的来源页面人工核对。' },
+  MULTIPLE_REPORT_CANDIDATES: { label: '发现多个候选报告', guidance: '通过来源链接核对报告期和基金身份，系统不会静默猜测。' },
+  LOW_PARSE_CONFIDENCE: { label: '报告解析置信度偏低', guidance: '结果可查看但不应直接作为高置信度结论，请核对原始报告。' },
+  NEGATIVE_PERCENTAGE: { label: '解析到负百分比', guidance: '核对表格列对齐、负号和 OCR 结果。' },
+  TOP_HOLDINGS_EXCEED_EQUITY: { label: '前十大持仓超过权益占比', guidance: '持仓合计与资产配置不一致，需要核对原始表格。' },
+  FUND_INVESTMENT_RECONCILIATION: { label: '基金投资占比勾稽不一致', guidance: '核对基金持仓和资产配置口径，暂不视为可靠穿透结果。' },
+  EMPTY_WITHOUT_EXPLICIT_DISCLOSURE: { label: '解析为空且报告未明确披露为空', guidance: '可能是版式未识别，请打开来源报告检查对应章节。' },
+  SALES_LIMIT_SYNC_FAILED: { label: '限额抓取失败', guidance: '查看具体份额和来源；公开页面恢复或份额归并修正后可重试同步。' },
+  SALES_LIMIT_COVERAGE_INCOMPLETE: { label: '渠道覆盖不完整', guidance: '这表示缺少渠道或状态仍未知，不等同于暂停申购。' },
+  SALES_LIMIT_CHANNEL_SCOPE_AMBIGUOUS: { label: '限额适用份额不明确', guidance: '公告未明确限额对应哪个份额，需通过来源人工核对。' },
+}
+
+const reportIssueCodes = new Set([
+  'REPORT_PARSE_FAILED',
+  'REPORT_SOURCE_MISSING',
+  'REPORT_SYNC_FAILED',
+  'REPORT_NOT_DISCOVERED',
+  'MULTIPLE_REPORT_CANDIDATES',
+  'LOW_PARSE_CONFIDENCE',
+  'NEGATIVE_PERCENTAGE',
+  'TOP_HOLDINGS_EXCEED_EQUITY',
+  'FUND_INVESTMENT_RECONCILIATION',
+  'EMPTY_WITHOUT_EXPLICIT_DISCLOSURE',
+])
+
+function normalizedIssueCode(issue: DataQualityIssue): string {
+  return String(issue.issue_code ?? issue.issue_type ?? 'DATA_QUALITY_ISSUE')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+}
+
+function isReportIssue(issue: DataQualityIssue): boolean {
+  return reportIssueCodes.has(normalizedIssueCode(issue))
+    || issueMatches(issue, ['report', 'parse', '报告', '解析', 'confidence', '置信度'])
+}
+
+function safeIssueSourceUrls(issue: DataQualityIssue): string[] {
+  return [...new Set(issue.source_urls ?? [])].filter((value) => {
+    try {
+      return ['http:', 'https:'].includes(new URL(value).protocol)
+    } catch {
+      return false
+    }
+  })
+}
+
 const limitAvailabilityStates = [
   ['OPEN', '开放', 'success'],
   ['PAUSED', '暂停', 'failed'],
@@ -98,7 +150,10 @@ export function DataOpsPage() {
   const preparationQuery = useQuery({
     queryKey: ['data-preparation-status'],
     queryFn: ({ signal }) => api.dataPreparationStatus(signal),
-    refetchInterval: 30_000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.latest_operation?.status
+      return status === 'queued' || status === 'running' ? 2_000 : 30_000
+    },
   })
   const operationMutation = useMutation({
     mutationFn: ({ operation, fundCodes = [] }: {
@@ -109,10 +164,15 @@ export function DataOpsPage() {
   })
 
   const funds = fundsQuery.data ?? []
-  const activeOperation = operationMutation.variables?.operation
-    ?? preparationQuery.data?.active_operation
-    ?? undefined
-  const operationBusy = operationMutation.isPending || Boolean(preparationQuery.data?.active_operation)
+  const persistedOperation = preparationQuery.data?.latest_operation
+  const submittedOperation = operationMutation.data
+  const operation = submittedOperation
+    && (!persistedOperation || submittedOperation.id > persistedOperation.id)
+    ? submittedOperation
+    : persistedOperation
+  const operationBusy = operationMutation.isPending
+    || operation?.status === 'queued'
+    || operation?.status === 'running'
   const runs = [...(runsQuery.data ?? [])].sort((a, b) => String(b.started_at ?? '').localeCompare(String(a.started_at ?? '')))
   const issues = [...(issuesQuery.data ?? [])].sort((a, b) => String(b.detected_at ?? b.created_at ?? '').localeCompare(String(a.detected_at ?? a.created_at ?? '')))
   const parsedCount = funds.filter(isParsed).length
@@ -166,8 +226,7 @@ export function DataOpsPage() {
         pending={preparationQuery.isPending}
         error={preparationQuery.error}
         operationBusy={operationBusy}
-        activeOperation={activeOperation}
-        result={operationMutation.data}
+        operation={operation}
         operationError={operationMutation.error}
         onRefresh={() => preparationQuery.refetch()}
         onRun={runOperation}
@@ -336,7 +395,7 @@ export function DataOpsPage() {
       </section>
 
       <div className="detail-grid ops-issue-grid">
-        <IssuePanel title="失败与低置信度解析" kicker="REPORT ISSUES" issues={openIssues.filter((issue) => issueMatches(issue, ['report', 'parse', '报告', '解析', 'confidence', '置信度']))} pending={issuesQuery.isPending} error={issuesQuery.error} onRetry={() => issuesQuery.refetch()} />
+        <IssuePanel title="失败与低置信度解析" kicker="REPORT ISSUES" issues={openIssues.filter(isReportIssue)} pending={issuesQuery.isPending} error={issuesQuery.error} onRetry={() => issuesQuery.refetch()} />
         <IssuePanel title="净值缺失日期" kicker="NAV GAPS" issues={navIssues} pending={issuesQuery.isPending} error={issuesQuery.error} onRetry={() => issuesQuery.refetch()} />
         <IssuePanel title="限额抓取与渠道覆盖" kicker="SALES LIMIT ISSUES" issues={limitIssues} pending={issuesQuery.isPending} error={issuesQuery.error} onRetry={() => issuesQuery.refetch()} />
       </div>
@@ -349,8 +408,7 @@ function DataPreparationPanel({
   pending,
   error,
   operationBusy,
-  activeOperation,
-  result,
+  operation,
   operationError,
   onRefresh,
   onRun,
@@ -359,8 +417,7 @@ function DataPreparationPanel({
   pending: boolean
   error: unknown
   operationBusy: boolean
-  activeOperation: DataOperationName | undefined
-  result: DataOperationResult | undefined
+  operation: DataOperationResult | null | undefined
   operationError: unknown
   onRefresh: () => void
   onRun: (operation: DataOperationName, fundCodes?: string[]) => void
@@ -371,7 +428,7 @@ function DataPreparationPanel({
 
   const total = status.total_funds
   const stages = [
-    { key: 'funds', label: '基金清单', ready: total, detail: total ? '基础资料已写入本地 universe' : '先导入基金' },
+    { key: 'funds', label: '基金清单', ready: total, detail: total ? `${status.total_shares} 个份额代码已归并` : '先导入基金' },
     { key: 'nav', label: '净值与价格', ready: status.nav_ready_funds, detail: status.latest_nav_date ? `最新 ${formatDate(status.latest_nav_date)}` : '尚未同步' },
     { key: 'limits', label: '今日申购限额', ready: status.limit_ready_funds, detail: status.latest_limit_snapshot_date ? `快照 ${formatDate(status.latest_limit_snapshot_date)}` : '尚无快照' },
     { key: 'reports', label: `${status.report_year} Q${status.report_quarter} 季报`, ready: status.report_downloaded_funds, detail: '最近已结束季度' },
@@ -379,15 +436,14 @@ function DataPreparationPanel({
     { key: 'lookthrough', label: '穿透计算', ready: status.lookthrough_ready_funds, detail: '不把未解析权重填成 0' },
   ]
   const fullyReady = total > 0 && stages.slice(1).every((stage) => stage.ready === total)
-  const activeLabels: Record<DataOperationName, string> = {
-    prepare: '正在准备全部数据…',
-    'sync-daily': '正在同步日常数据…',
-    'sync-sales-limits': '正在同步今日限额…',
-    'sync-reports': '正在获取季度报告…',
-    'parse-reports': '正在解析报告并计算穿透…',
+  const operationLabels: Record<DataOperationName, string> = {
+    prepare: '准备全部数据',
+    'sync-daily': '同步日常数据',
+    'sync-sales-limits': '同步今日限额',
+    'sync-reports': '获取季度报告',
+    'parse-reports': '解析报告并计算穿透',
   }
-  const written = result?.runs.reduce((sum, run) => sum + (toNumber(run.records_written) ?? 0), 0) ?? 0
-  const failed = result?.runs.reduce((sum, run) => sum + (toNumber(run.records_failed) ?? 0), 0) ?? 0
+  const operationActive = operation?.status === 'queued' || operation?.status === 'running'
 
   return (
     <section className="panel data-preparation" aria-labelledby="data-preparation-title">
@@ -396,7 +452,7 @@ function DataPreparationPanel({
           <span className="section-kicker">NEXT STEPS</span>
           <h2 id="data-preparation-title">数据准备向导</h2>
           <p>{total > 0
-            ? `已导入 ${total} 只基金。日常数据与季度报告可以独立同步；穿透需要先取得并解析报告。`
+            ? `已归并为 ${total} 个基金合同、${status.total_shares} 个份额。日常数据与季度报告可以独立同步；穿透需要先取得并解析报告。`
             : '导入基金后，这里会引导完成净值、限额、季报和穿透数据。'}</p>
         </div>
         {fullyReady && <StatusBadge value="success" label="基础数据已就绪" />}
@@ -434,17 +490,27 @@ function DataPreparationPanel({
         </div>
       )}
 
-      {operationBusy && activeOperation && (
+      {operationActive && operation && (
         <div className="preparation-running" role="status">
           <RefreshCw size={16} className="spin" />
-          <div><strong>{activeLabels[activeOperation]}</strong><span>可在下方 ingestion run 查看逐项进度；请勿重复提交。</span></div>
+          <div>
+            <strong>
+              任务 #{operation.id}：{statusLabel(operation.status)} · {operationLabels[operation.current_stage ?? operation.operation]}
+            </strong>
+            <span>阶段 {operation.stage_completed} / {operation.stage_total}；任务在独立 worker 运行，刷新页面不会丢失进度。</span>
+          </div>
         </div>
       )}
       {Boolean(operationError) && <ErrorPanel compact error={operationError} />}
-      {result && !operationBusy && (
-        <div className={`preparation-result tone-${issueTone(result.status)}`} role="status">
-          <div><strong>任务结果：{statusLabel(result.status)}</strong><span>{result.fund_codes.length} 只基金 · {result.runs.length} 个子任务</span></div>
-          <div><strong>{written}</strong><span>写入</span><strong>{failed}</strong><span>失败</span></div>
+      {operation && !operationActive && (
+        <div className={`preparation-result tone-${issueTone(operation.status)}`} role="status">
+          <div>
+            <strong>任务 #{operation.id} 已结束：{statusLabel(operation.status)}</strong>
+            <span>{operation.fund_codes.length} 个基金合同 · 完成阶段 {operation.stage_completed} / {operation.stage_total} · {formatDate(operation.finished_at, true)}</span>
+            {operation.status === 'partial' && <span>部分完成表示已有可用数据，但仍有失败项；未覆盖部分不会被伪装成完成，请查看下方任务记录和质量问题。</span>}
+            {operation.error_message && <span>{operation.error_message}</span>}
+          </div>
+          <div><strong>{operation.records_written}</strong><span>写入</span><strong>{operation.records_failed}</strong><span>失败</span></div>
         </div>
       )}
 
@@ -706,6 +772,13 @@ function IssuePanel({ title, kicker, issues, pending, error, onRetry }: {
   error: unknown
   onRetry: () => void
 }) {
+  const groups = [...issues.reduce((result, issue) => {
+    const code = normalizedIssueCode(issue)
+    result.set(code, [...(result.get(code) ?? []), issue])
+    return result
+  }, new Map<string, DataQualityIssue[]>())]
+    .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+
   return (
     <section className="panel">
       <div className="panel-heading"><div><span className="section-kicker">{kicker}</span><h2>{title}</h2></div><FileWarning size={20} /></div>
@@ -713,21 +786,51 @@ function IssuePanel({ title, kicker, issues, pending, error, onRetry }: {
       {Boolean(error) && <ErrorPanel compact error={error} onRetry={onRetry} />}
       {!pending && !error && issues.length === 0 && <EmptyPanel compact title="没有相关问题" detail="当前问题表未返回这一类型的开放记录。" />}
       {!pending && !error && issues.length > 0 && (
-        <div className="issue-list ops-issue-list">
-          {issues.slice(0, 12).map((issue) => (
-            <article key={String(issue.id)}>
-              {issueTone(issue.severity) === 'bad' ? <AlertCircle size={17} /> : <ShieldAlert size={17} />}
-              <div>
-                <strong>{displayText(issue.issue_code ?? issue.issue_type, '数据质量问题')}</strong>
-                <p>{displayText(issue.message)}</p>
-                <small>{displayText(issue.representative_code ?? issue.fund_name ?? issue.fund_contract_id, '未关联基金')} · {formatDate(issue.detected_at ?? issue.created_at, true)}</small>
-              </div>
-              <StatusBadge value={issue.severity} />
-            </article>
-          ))}
+        <div className="issue-groups">
+          <p className="issue-group-hint">已按错误类型归组，点击一类查看基金、原始错误和溯源链接。</p>
+          {groups.map(([code, group]) => {
+            const presentation = issuePresentation[code] ?? {
+              label: '其他数据质量问题',
+              guidance: '请根据内部错误码、具体信息和来源记录进一步核对。',
+            }
+            const severity = group.some((issue) => issueTone(issue.severity) === 'bad') ? 'ERROR' : 'WARNING'
+            return (
+              <details className="issue-group" key={code}>
+                <summary>
+                  <span>{issueTone(severity) === 'bad' ? <AlertCircle size={17} /> : <ShieldAlert size={17} />}</span>
+                  <span className="issue-group-title"><strong>{presentation.label}</strong><code>{code}</code></span>
+                  <span className="issue-group-count">{group.length} 项</span>
+                </summary>
+                <p className="issue-guidance">{presentation.guidance}</p>
+                <div className="issue-list ops-issue-list">
+                  {group.map((issue) => {
+                    const sourceUrls = safeIssueSourceUrls(issue)
+                    return (
+                      <article key={String(issue.id)}>
+                        {issueTone(issue.severity) === 'bad' ? <AlertCircle size={17} /> : <ShieldAlert size={17} />}
+                        <div>
+                          <strong>{displayText(issue.fund_name ?? issue.representative_code ?? issue.fund_contract_id, '未关联基金')}</strong>
+                          <p>{displayText(issue.message)}</p>
+                          <small>
+                            {issue.fund_contract_id ? <Link to={`/funds/${String(issue.fund_contract_id)}`}>{displayText(issue.representative_code, '查看基金')}</Link> : displayText(issue.representative_code, '未关联基金')}
+                            {' · '}{formatDate(issue.detected_at ?? issue.created_at, true)}
+                          </small>
+                          {sourceUrls.length > 0 && (
+                            <div className="issue-source-links">
+                              {sourceUrls.map((url, index) => <a href={url} target="_blank" rel="noreferrer" key={url}><ExternalLink size={12} />来源 {index + 1}</a>)}
+                            </div>
+                          )}
+                        </div>
+                        <StatusBadge value={issue.severity} />
+                      </article>
+                    )
+                  })}
+                </div>
+              </details>
+            )
+          })}
         </div>
       )}
-      {issues.length > 12 && <p className="panel-note">仅显示最近 12 项，共 {issues.length} 项。</p>}
     </section>
   )
 }

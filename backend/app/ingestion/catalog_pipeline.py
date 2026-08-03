@@ -10,6 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.ingestion.archive import archive_bytes
+from backend.app.ingestion.fund_grouping import (
+    matching_public_contracts,
+    merge_contract_group,
+    share_priority,
+)
 from backend.app.ingestion.providers.base import (
     FundCatalogProvider,
     FundCatalogSnapshot,
@@ -56,6 +61,26 @@ def import_public_funds(
                 raise ProviderSchemaError(
                     f"Exact public fund metadata is missing manager_name for {code}"
                 )
+            incoming_share = _share_metadata(
+                candidate.fund_code,
+                candidate.fund_name,
+                candidate.currency,
+                candidate.wrapper_type,
+            )
+            matches = matching_public_contracts(
+                session,
+                manager_name=candidate.manager_name,
+                fund_name=candidate.fund_name,
+                wrapper_type=candidate.wrapper_type,
+            )
+            existing = merge_contract_group(session, matches) if matches else None
+            representative_code = existing.representative_code if existing else candidate.fund_code
+            canonical_name = existing.canonical_name if existing else candidate.fund_name
+            incoming_is_preferred = existing is None or share_priority(
+                incoming_share.currency,
+                incoming_share.share_class,
+                incoming_share.code,
+            ) < _existing_representative_priority(session, existing)
             universe = UniverseInput(
                 workbook=Path(f"public-catalog-{code}.json"),
                 requested_sheet="PUBLIC_CATALOG",
@@ -64,19 +89,12 @@ def import_public_funds(
                 contracts=(
                     ContractInput(
                         source_row=1,
-                        representative_code=candidate.fund_code,
-                        representative_fund_name=candidate.fund_name,
+                        representative_code=representative_code,
+                        representative_fund_name=canonical_name,
                         manager_name=candidate.manager_name,
-                        canonical_name=candidate.fund_name,
+                        canonical_name=canonical_name,
                         declared_share_count=1,
-                        shares=(
-                            _share_metadata(
-                                candidate.fund_code,
-                                candidate.fund_name,
-                                candidate.currency,
-                                candidate.wrapper_type,
-                            ),
-                        ),
+                        shares=(incoming_share,),
                         region="OVERSEAS_UNSPECIFIED",
                         original_category=candidate.category,
                         strategy_type=candidate.category,
@@ -92,6 +110,15 @@ def import_public_funds(
             )
             with session.begin_nested():
                 import_universe(session, universe, run)
+                share = session.scalar(
+                    select(FundShare).where(FundShare.share_code == candidate.fund_code)
+                )
+                if share is None:
+                    raise RuntimeError("catalog import did not create the selected share")
+                contract = share.fund_contract
+                if incoming_is_preferred:
+                    contract.representative_code = candidate.fund_code
+                    contract.canonical_name = candidate.fund_name
                 _archive_catalog_snapshot(
                     session,
                     run.id,
@@ -129,6 +156,21 @@ def import_public_funds(
     return PublicImportResult(status, tuple(imported), failures)
 
 
+def _existing_representative_priority(
+    session: Session,
+    contract: FundContract,
+) -> tuple[int, int, str]:
+    share = session.scalar(
+        select(FundShare).where(
+            FundShare.fund_contract_id == contract.id,
+            FundShare.share_code == contract.representative_code,
+        )
+    )
+    if share is None:
+        return (4, 4, contract.representative_code)
+    return share_priority(share.currency, share.share_class, share.share_code)
+
+
 def _archive_catalog_snapshot(
     session: Session,
     run_id: int,
@@ -154,12 +196,8 @@ def _archive_catalog_snapshot(
     )
     if existing is not None:
         return
-    contract = session.scalar(
-        select(FundContract).where(
-            FundContract.representative_code == candidate.fund_code
-        )
-    )
     share = session.scalar(select(FundShare).where(FundShare.share_code == candidate.fund_code))
+    contract = share.fund_contract if share is not None else None
     if contract is None or share is None:
         raise RuntimeError("catalog import did not create the selected fund")
     session.add(

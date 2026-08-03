@@ -35,7 +35,7 @@ QDII_AUTO_CREATE_DATABASE=true
 - 并发创建产生 `DuplicateDatabase` 时会重新查询；只有确认目标库存在才继续。
 - 管理员 URL 只注入自动删除的一次性 provision 容器，不传给长期运行的 backend。
 
-`make docker-up-external` 会先运行一次性 provision，再启动 backend/frontend。任一步失败都会阻止后续启动。关闭自动建库时不需要配置管理员 URL，行为与原先一致。
+`make docker-up-external` 会先运行一次性 provision，再启动 backend、独立数据 worker 和 frontend。任一步失败都会阻止后续启动。关闭自动建库时不需要配置管理员 URL，行为与原先一致。
 
 ## 启动和验证
 
@@ -45,7 +45,7 @@ docker compose --env-file .env -f compose.yaml -f compose.external.yaml ps
 curl --fail http://127.0.0.1:8000/ready
 ```
 
-外部 overlay 会让内置 `postgres` 服务进入非默认 profile，因此不会启动本地 PG 容器。长期运行的 backend 只读取 `QDII_EXTERNAL_DATABASE_URL`。不要用 `make docker-up` 代替上面的外部启动命令；默认命令始终选择内置 PostgreSQL。
+外部 overlay 会让内置 `postgres` 服务进入非默认 profile，因此不会启动本地 PG 容器。长期运行的 backend 和 worker 只读取 `QDII_EXTERNAL_DATABASE_URL`，管理员 URL 不会传给它们。不要用 `make docker-up` 代替上面的外部启动命令；默认命令始终选择内置 PostgreSQL。
 
 正常 `restart`、每日同步和停止仍可使用：
 

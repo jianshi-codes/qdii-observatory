@@ -515,18 +515,30 @@ class DataOperationRequest(ApiModel):
 
 
 class DataOperationRead(ApiModel):
+    id: int
     operation: str
     status: str
     fund_codes: list[str]
+    lookback_days: int
     report_year: int | None = None
     report_quarter: int | None = None
-    lookthrough_reports: int | None = None
-    runs: list[IngestionRunRead]
+    current_stage: str | None
+    stage_completed: int
+    stage_total: int
+    run_ids: list[int]
+    records_written: int
+    records_failed: int
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    error_message: str | None
 
 
 class DataPreparationStatusRead(ApiModel):
     active_operation: str | None
+    latest_operation: DataOperationRead | None
     total_funds: int
+    total_shares: int
     nav_ready_funds: int
     latest_nav_date: date | None
     limit_ready_funds: int
@@ -549,6 +561,9 @@ class DataQualityIssueRead(ApiModel):
     status: str
     message: str
     details: dict[str, Any]
+    representative_code: str | None = None
+    fund_name: str | None = None
+    source_urls: list[str] = Field(default_factory=list)
     detected_at: datetime
     resolved_at: datetime | None
     created_at: datetime

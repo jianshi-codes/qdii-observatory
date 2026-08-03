@@ -17,3 +17,7 @@ services:
   backend:
     environment:
       QDII_DATABASE_URL: ${QDII_EXTERNAL_DATABASE_URL:?set QDII_EXTERNAL_DATABASE_URL to the target PostgreSQL database}
+
+  worker:
+    environment:
+      QDII_DATABASE_URL: ${QDII_EXTERNAL_DATABASE_URL:?set QDII_EXTERNAL_DATABASE_URL to the target PostgreSQL database}

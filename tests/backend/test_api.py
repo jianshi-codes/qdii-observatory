@@ -9,13 +9,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.app import api as api_module
-from backend.app.data_operations import DataOperationResult, operation_guard
 from backend.app.models import (
     DailyExchangePrice,
     DailyExchangeRate,
     DailyFundFee,
     DailyFundNav,
     DailyPurchaseLimit,
+    DataOperation,
     DataQualityIssue,
     ExposureFamily,
     FundContract,
@@ -760,6 +760,55 @@ def test_compare_and_operations_endpoints(client: TestClient, seeded: dict[str, 
     assert runs.json()[0]["records_seen"] == 51
     assert issues.status_code == 200
     assert issues.json()[0]["issue_code"] == "LOW_PARSE_CONFIDENCE"
+    assert issues.json()[0]["representative_code"] == "000834"
+    assert issues.json()[0]["fund_name"] == "大成纳斯达克100ETF联接"
+    assert "https://example.test/report" in issues.json()[0]["source_urls"]
+    assert "https://example.test/direct-limit" not in issues.json()[0]["source_urls"]
+    assert "https://example.test/159513-limit" not in issues.json()[0]["source_urls"]
+
+
+def test_quality_issue_sources_are_limited_to_the_exact_share_and_contract(
+    client: TestClient,
+    db_session: Session,
+    seeded: dict[str, int],
+) -> None:
+    db_session.add_all(
+        [
+            SourceArtifact(
+                fund_contract_id=seeded["feeder"],
+                fund_share_id=seeded["feeder_share"],
+                artifact_type="NAV_JSON",
+                source_provider="NAV_FIXTURE",
+                source_url="https://example.test/unrelated-nav",
+                local_path="nav/000834.json",
+                mime_type="application/json",
+                sha256="9" * 64,
+                byte_size=100,
+                metadata_json={},
+            ),
+            DataQualityIssue(
+                fund_contract_id=seeded["feeder"],
+                fund_share_id=seeded["feeder_share"],
+                issue_code="SALES_LIMIT_COVERAGE_INCOMPLETE",
+                severity="WARNING",
+                status="OPEN",
+                message="Fixture limit issue",
+                details={"missing_channels": [], "unknown_states": []},
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/data-quality-issues?status=OPEN")
+
+    assert response.status_code == 200
+    issue = next(
+        item for item in response.json() if item["issue_code"] == "SALES_LIMIT_COVERAGE_INCOMPLETE"
+    )
+    assert "https://example.test/direct-limit" in issue["source_urls"]
+    assert "https://example.test/distribution-limit" in issue["source_urls"]
+    assert "https://example.test/159513-limit" not in issue["source_urls"]
+    assert "https://example.test/unrelated-nav" not in issue["source_urls"]
 
 
 def test_data_preparation_status_reports_each_ready_stage(
@@ -772,7 +821,9 @@ def test_data_preparation_status_reports_each_ready_stage(
     payload = response.json()
     assert payload == {
         "active_operation": None,
+        "latest_operation": None,
         "total_funds": 2,
+        "total_shares": 2,
         "nav_ready_funds": 2,
         "latest_nav_date": "2026-07-30",
         "limit_ready_funds": 2,
@@ -785,82 +836,59 @@ def test_data_preparation_status_reports_each_ready_stage(
     }
 
 
-def test_prepare_operation_is_explicit_scoped_and_returns_component_runs(
+def test_prepare_operation_is_explicit_scoped_and_queued(
     client: TestClient,
     db_session: Session,
     seeded: dict[str, int],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_prepare(
-        session: Session,
-        raw_root: Path,
-        **kwargs: object,
-    ) -> DataOperationResult:
-        captured.update(session=session, raw_root=raw_root, kwargs=kwargs)
-        run = IngestionRun(
-            job_type="sync_nav",
-            status="succeeded",
-            parameters={"source": "test"},
-            records_seen=1,
-            records_written=1,
-            records_failed=0,
-        )
-        session.add(run)
-        session.commit()
-        return DataOperationResult(
-            operation="prepare_data",
-            status="succeeded",
-            fund_codes=("000834",),
-            runs=(run,),
-            report_year=2026,
-            report_quarter=2,
-            lookthrough_reports=1,
-        )
-
     monkeypatch.setattr(api_module, "raw_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(api_module, "prepare_data", fake_prepare)
 
     response = client.post(
         "/api/operations/prepare",
         json={"fund_codes": ["000834"], "lookback_days": 10},
     )
 
-    assert response.status_code == 200, response.text
-    assert captured["session"] is db_session
-    assert captured["raw_root"] == tmp_path
-    assert captured["kwargs"] == {
-        "fund_codes": ("000834",),
-        "year": 2026,
-        "quarter": 2,
-        "lookback_days": 10,
-    }
-    assert response.json()["runs"][0]["job_type"] == "sync_nav"
-    assert response.json()["lookthrough_reports"] == 1
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["operation"] == "prepare"
+    assert payload["status"] == "queued"
+    assert payload["fund_codes"] == ["000834"]
+    assert payload["stage_total"] == 3
+    queued = db_session.get(DataOperation, payload["id"])
+    assert queued is not None
+    assert queued.active_slot == 1
 
 
 def test_data_operation_rejects_unknown_fund_and_concurrent_run(
     client: TestClient,
     seeded: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    monkeypatch.setattr(api_module, "raw_data_dir", lambda: tmp_path)
     unknown = client.post(
         "/api/operations/sync-sales-limits",
         json={"fund_codes": ["999999"]},
     )
     assert unknown.status_code == 404
 
-    with operation_guard("sync-reports"):
-        active = client.get("/api/operations/preparation-status")
-        concurrent = client.post(
-            "/api/operations/sync-sales-limits",
-            json={"fund_codes": ["000834"]},
-        )
+    queued = client.post(
+        "/api/operations/sync-reports",
+        json={"fund_codes": ["000834"]},
+    )
+    active = client.get("/api/operations/preparation-status")
+    concurrent = client.post(
+        "/api/operations/sync-sales-limits",
+        json={"fund_codes": ["000834"]},
+    )
+    assert queued.status_code == 202
     assert active.status_code == 200
     assert active.json()["active_operation"] == "sync-reports"
+    assert active.json()["latest_operation"]["status"] == "queued"
     assert concurrent.status_code == 409
-    assert concurrent.json()["detail"] == "another data operation is already running"
+    assert concurrent.json()["detail"] == "data operation 1 (sync-reports) is queued"
 
 
 def test_filters_validation_and_not_found(client: TestClient, seeded: dict[str, int]) -> None:

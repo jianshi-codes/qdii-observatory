@@ -17,7 +17,9 @@ make docker-down
 
 日常启动、交易日同步、正常重启、配置变更后的重建和停止方式见 [daily-operations.md](daily-operations.md)。其中 `restart` 不重建镜像，也不会应用新的 `.env`；代码或配置变化后应使用 `make docker-up`。
 
-外部 PostgreSQL 部署在代码或配置变化后应使用 `make docker-up-external`。启动前状态识别、冲突拒绝和 `/ready` 语义见 [external-postgresql.md](external-postgresql.md)。项目不会自动创建 database，也不会对未知库执行 `alembic stamp`。
+外部 PostgreSQL 部署在代码或配置变化后应使用 `make docker-up-external`。启动前状态识别、冲突拒绝和 `/ready` 语义见 [external-postgresql.md](external-postgresql.md)。只有显式配置管理员 URL 和 `QDII_AUTO_CREATE_DATABASE=true` 才会按需创建 database；项目不会对未知库执行 `alembic stamp`。
+
+页面触发的数据准备任务保存在 `data_operation`，由独立 worker 串行执行。API 返回 202 后不等待抓取或解析完成；检查任务终态、ingestion run 和质量问题三者，不能把 `partial` 当成成功。worker 意外重启会将中断任务标为失败并释放任务槽，不会伪造完成状态。
 
 ## 备份
 

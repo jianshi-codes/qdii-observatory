@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DataPreparationStatus } from '../api/types'
 import { DataOpsPage } from './DataOpsPage'
 
 function response(body: unknown) {
@@ -12,10 +13,12 @@ function response(body: unknown) {
   }))
 }
 
-function preparationStatus(totalFunds = 0) {
+function preparationStatus(totalFunds = 0): DataPreparationStatus {
   return {
     active_operation: null,
+    latest_operation: null,
     total_funds: totalFunds,
+    total_shares: totalFunds,
     nav_ready_funds: 0,
     latest_nav_date: null,
     limit_ready_funds: 0,
@@ -47,6 +50,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
   })
 
   it('shows latest-day coverage, every state category, and limit quality issues', async () => {
+    const user = userEvent.setup()
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const path = String(input)
       if (path === '/api/funds') return response({ items: [
@@ -60,6 +64,10 @@ describe('DataOpsPage purchase-limit coverage', () => {
         severity: 'high',
         status: 'open',
         message: '两只份额缺少今日渠道快照',
+        fund_contract_id: 1,
+        representative_code: '000001',
+        fund_name: '基金一',
+        source_urls: ['https://example.test/limit-source'],
       }] })
       if (path === '/api/purchase-limit-coverage') return response({
         total_funds: 2,
@@ -93,8 +101,11 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(screen.getByText('有限额')).toBeInTheDocument()
     expect(screen.getByText('不限额')).toBeInTheDocument()
     expect(screen.getByText('限额未知')).toBeInTheDocument()
+    expect(screen.getByText('渠道覆盖不完整')).toBeInTheDocument()
     expect(screen.getByText('SALES_LIMIT_COVERAGE_INCOMPLETE')).toBeInTheDocument()
+    await user.click(screen.getByText('渠道覆盖不完整'))
     expect(screen.getByText('两只份额缺少今日渠道快照')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '来源 1' })).toHaveAttribute('href', 'https://example.test/limit-source')
   })
 
   it('discovers by an independent source category and imports only explicitly selected funds', async () => {
@@ -230,6 +241,61 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(container.querySelector('.provider-health-row.run-row')).not.toBeInTheDocument()
   })
 
+  it('keeps a persisted partial operation visible after a page refresh', async () => {
+    const status = preparationStatus(12)
+    status.total_shares = 33
+    status.latest_operation = {
+      id: 14,
+      operation: 'prepare',
+      status: 'partial',
+      fund_codes: Array.from({ length: 12 }, (_, index) => String(index).padStart(6, '0')),
+      lookback_days: 10,
+      report_year: 2026,
+      report_quarter: 2,
+      current_stage: null,
+      stage_completed: 3,
+      stage_total: 3,
+      run_ids: [5, 6, 7],
+      records_written: 70,
+      records_failed: 8,
+      started_at: '2026-08-03T04:30:00Z',
+      finished_at: '2026-08-03T04:42:00Z',
+      error_message: null,
+      created_at: '2026-08-03T04:30:00Z',
+    }
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/funds') return response({ items: [] })
+      if (path === '/api/ingestion-runs') return response({ items: [] })
+      if (path === '/api/data-quality-issues') return response({ items: [] })
+      if (path === '/api/purchase-limit-coverage') return response({
+        total_funds: 12,
+        covered_funds: 12,
+        total_shares: 33,
+        covered_shares: 33,
+        latest_snapshot_date: '2026-08-03',
+        availability_state_counts: {},
+        cap_state_counts: {},
+      })
+      if (path === '/api/provider-health') return response({ items: [] })
+      if (path === '/api/operations/preparation-status') return response(status)
+      if (path === '/api/fund-catalog/options') return response({
+        companies: [],
+        source_categories: [{ value: 'ALL', label: '全部来源分类' }],
+        research_scopes: [{ value: 'ALL', label: '全部 QDII' }],
+        source_provider: 'fixture',
+        source_notice: '公开来源提示',
+      })
+      throw new Error(`unexpected request: ${path}`)
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('任务 #14 已结束：部分完成')).toBeInTheDocument()
+    expect(screen.getByText(/部分完成表示已有可用数据/)).toBeInTheDocument()
+    expect(screen.getByText(/12 个基金合同、33 个份额/)).toBeInTheDocument()
+  })
+
   it('guides the user from imported funds into an explicit preparation workflow', async () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -264,24 +330,23 @@ describe('DataOpsPage purchase-limit coverage', () => {
         expect(init?.method).toBe('POST')
         expect(init?.body).toBe(JSON.stringify({ fund_codes: [], lookback_days: 10 }))
         return response({
-          operation: 'prepare_data',
-          status: 'partial',
+          id: 9,
+          operation: 'prepare',
+          status: 'queued',
           fund_codes: ['900001'],
+          lookback_days: 10,
           report_year: 2026,
           report_quarter: 2,
-          lookthrough_reports: 0,
-          runs: [{
-            id: 9,
-            job_type: 'sync_nav',
-            status: 'partial',
-            parameters: {},
-            started_at: '2026-08-03T01:00:00Z',
-            finished_at: '2026-08-03T01:01:00Z',
-            records_seen: 1,
-            records_written: 2,
-            records_failed: 1,
-            error_message: null,
-          }],
+          current_stage: null,
+          stage_completed: 0,
+          stage_total: 3,
+          run_ids: [],
+          records_written: 0,
+          records_failed: 0,
+          created_at: '2026-08-03T01:00:00Z',
+          started_at: null,
+          finished_at: null,
+          error_message: null,
         })
       }
       throw new Error(`unexpected request: ${path}`)
@@ -297,8 +362,8 @@ describe('DataOpsPage purchase-limit coverage', () => {
 
     await user.click(screen.getByRole('button', { name: '开始准备 1 只基金数据' }))
 
-    expect(await screen.findByText('任务结果：部分完成')).toBeInTheDocument()
-    expect(screen.getByText('1 只基金 · 1 个子任务')).toBeInTheDocument()
+    expect(await screen.findByText(/任务 #9：已排队/)).toBeInTheDocument()
+    expect(screen.getByText(/阶段 0 \/ 3/)).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/operations/prepare',
       expect.objectContaining({ method: 'POST' }),

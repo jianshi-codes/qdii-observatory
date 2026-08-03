@@ -123,7 +123,7 @@ export function issueTone(value: unknown): 'good' | 'warn' | 'bad' | 'neutral' {
   if (['success', 'succeeded', 'parsed', 'valid_empty', 'completed', 'resolved', 'closed'].includes(normalized)) {
     return 'good'
   }
-  if (['warning', 'low_confidence', 'partial', 'running', 'pending', 'unresolved', 'open'].includes(normalized)) {
+  if (['warning', 'low_confidence', 'partial', 'queued', 'running', 'pending', 'unresolved', 'open'].includes(normalized)) {
     return 'warn'
   }
   if (['error', 'failed', 'failed_with_reason', 'critical', 'high'].includes(normalized)) {
@@ -144,6 +144,7 @@ export function statusLabel(value: unknown): string {
     succeeded: '成功',
     partial: '部分完成',
     completed: '已完成',
+    queued: '已排队',
     running: '运行中',
     pending: '等待中',
     open: '待处理',

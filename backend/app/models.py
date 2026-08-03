@@ -905,6 +905,61 @@ class IngestionRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
 
 
+class DataOperation(TimestampMixin, Base):
+    """One durable user-requested data operation executed by the worker service."""
+
+    __tablename__ = "data_operation"
+    __table_args__ = (
+        CheckConstraint(
+            "operation IN ('prepare', 'sync-daily', 'sync-sales-limits', "
+            "'sync-reports', 'parse-reports')",
+            name="operation_allowed",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'partial', 'failed')",
+            name="status_allowed",
+        ),
+        CheckConstraint(
+            "(status IN ('queued', 'running') AND active_slot = 1) OR "
+            "(status IN ('succeeded', 'partial', 'failed') AND active_slot IS NULL)",
+            name="active_slot_matches_status",
+        ),
+        CheckConstraint("lookback_days BETWEEN 1 AND 30", name="lookback_days_range"),
+        CheckConstraint(
+            "report_quarter IS NULL OR report_quarter BETWEEN 1 AND 4",
+            name="report_quarter_range",
+        ),
+        CheckConstraint(
+            "stage_completed >= 0 AND stage_total >= 1 AND stage_completed <= stage_total",
+            name="stage_progress_range",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    operation: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    active_slot: Mapped[int | None] = mapped_column(Integer, unique=True)
+    fund_codes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    lookback_days: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    report_year: Mapped[int | None] = mapped_column(Integer)
+    report_quarter: Mapped[int | None] = mapped_column(Integer)
+    current_stage: Mapped[str | None] = mapped_column(String(50))
+    stage_completed: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    stage_total: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    run_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
+    records_written: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    records_failed: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+
 class SourceArtifact(TimestampMixin, Base):
     __tablename__ = "source_artifact"
     __table_args__ = (

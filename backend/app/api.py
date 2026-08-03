@@ -4,41 +4,29 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Generator
+from dataclasses import asdict
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from itertools import combinations
 from math import sqrt
-from pathlib import Path as FilePath
 from typing import Annotated, Literal, NoReturn, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from sqlalchemy import Select, and_, func, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from backend.app.data_operations import (
-    DataOperationResult,
     NoSelectedFundsError,
-    OperationInProgressError,
     UnknownFundCodesError,
     latest_completed_quarter,
-    operation_guard,
-    parse_reports_data,
     preparation_status,
-    prepare_data,
     selected_fund_codes,
-    sync_daily_data,
-    sync_reports_data,
-    sync_sales_limits_data,
 )
 from backend.app.database import get_db
 from backend.app.ingestion.catalog_pipeline import import_public_funds
 from backend.app.ingestion.http import ProviderHttpClient, ProviderHttpError, RetryPolicy
-from backend.app.ingestion.provider_registry import (
-    ProviderConfigurationError,
-    load_provider_registry,
-    provider_status,
-)
+from backend.app.ingestion.provider_registry import load_provider_registry, provider_status
 from backend.app.ingestion.providers.base import FundCatalogProvider, ProviderSchemaError
 from backend.app.ingestion.providers.catalog import (
     RESEARCH_SCOPES,
@@ -52,6 +40,7 @@ from backend.app.models import (
     DailyFundFee,
     DailyFundNav,
     DailyPurchaseLimit,
+    DataOperation,
     DataQualityIssue,
     FundContract,
     FundExposureFamily,
@@ -65,6 +54,12 @@ from backend.app.models import (
     ReportFundHolding,
     ReportIndustryAllocation,
     ReportSecurityHolding,
+    SourceArtifact,
+)
+from backend.app.operation_queue import (
+    OperationInProgressError,
+    enqueue_operation,
+    latest_operation,
 )
 from backend.app.schemas import (
     AllocationItemRead,
@@ -541,12 +536,10 @@ def get_fund_catalog_options(provider: CatalogProvider) -> FundCatalogOptionsRea
             for item in companies
         ],
         source_categories=[
-            SourceCategoryChoiceRead(value=value, label=label)
-            for value, label in SOURCE_CATEGORIES
+            SourceCategoryChoiceRead(value=value, label=label) for value, label in SOURCE_CATEGORIES
         ],
         research_scopes=[
-            ResearchScopeChoiceRead(value=value, label=label)
-            for value, label in RESEARCH_SCOPES
+            ResearchScopeChoiceRead(value=value, label=label) for value, label in RESEARCH_SCOPES
         ],
         source_provider=provider.name,
         source_notice="第三方公开目录可能延迟或变更；导入前请核对基金公司正式信息。",
@@ -634,23 +627,17 @@ def import_selected_public_funds(
     )
 
 
-def _data_operation_response(result: DataOperationResult) -> DataOperationRead:
-    return DataOperationRead(
-        operation=result.operation,
-        status=result.status,
-        fund_codes=list(result.fund_codes),
-        report_year=result.report_year,
-        report_quarter=result.report_quarter,
-        lookthrough_reports=result.lookthrough_reports,
-        runs=[IngestionRunRead.model_validate(run) for run in result.runs],
-    )
+def _data_operation_response(result: DataOperation) -> DataOperationRead:
+    return DataOperationRead.model_validate(result)
 
 
 def _data_operation_inputs(
     db: Session,
     request: DataOperationRequest,
-) -> tuple[tuple[str, ...], FilePath]:
-    return selected_fund_codes(db, set(request.fund_codes) or None), raw_data_dir()
+) -> tuple[str, ...]:
+    codes = selected_fund_codes(db, set(request.fund_codes) or None)
+    raw_data_dir()
+    return codes
 
 
 def _raise_data_operation_error(error: Exception) -> NoReturn:
@@ -660,116 +647,91 @@ def _raise_data_operation_error(error: Exception) -> NoReturn:
         raise HTTPException(status_code=409, detail=str(error)) from error
     if isinstance(error, UnknownFundCodesError):
         raise HTTPException(status_code=404, detail=str(error)) from error
-    if isinstance(error, (StoragePreflightError, ProviderConfigurationError)):
+    if isinstance(error, StoragePreflightError):
         raise HTTPException(status_code=503, detail=str(error)) from error
     raise error
 
 
+def _enqueue_data_operation(
+    operation: str,
+    request: DataOperationRequest,
+    db: Session,
+) -> DataOperationRead:
+    try:
+        codes = _data_operation_inputs(db, request)
+        year, quarter = latest_completed_quarter()
+        return _data_operation_response(
+            enqueue_operation(
+                db,
+                operation=operation,
+                fund_codes=codes,
+                lookback_days=request.lookback_days,
+                report_year=year,
+                report_quarter=quarter,
+            )
+        )
+    except Exception as error:
+        _raise_data_operation_error(error)
+
+
 @router.get("/operations/preparation-status", response_model=DataPreparationStatusRead)
 def get_data_preparation_status(db: DbSession) -> DataPreparationStatusRead:
-    return DataPreparationStatusRead.model_validate(preparation_status(db))
+    status = preparation_status(db)
+    latest = latest_operation(db)
+    active = latest if latest is not None and latest.status in {"queued", "running"} else None
+    return DataPreparationStatusRead(
+        **asdict(status),
+        active_operation=active.operation if active is not None else None,
+        latest_operation=(_data_operation_response(latest) if latest is not None else None),
+    )
 
 
-@router.post("/operations/prepare", response_model=DataOperationRead)
+@router.get("/operations/{operation_id}", response_model=DataOperationRead)
+def get_data_operation(operation_id: int, db: DbSession) -> DataOperationRead:
+    item = db.get(DataOperation, operation_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="data operation not found")
+    return _data_operation_response(item)
+
+
+@router.post("/operations/prepare", response_model=DataOperationRead, status_code=202)
 def prepare_imported_fund_data(
     request: DataOperationRequest,
     db: DbSession,
 ) -> DataOperationRead:
-    try:
-        with operation_guard("prepare"):
-            codes, raw_root = _data_operation_inputs(db, request)
-            year, quarter = latest_completed_quarter()
-            return _data_operation_response(
-                prepare_data(
-                    db,
-                    raw_root,
-                    fund_codes=codes,
-                    year=year,
-                    quarter=quarter,
-                    lookback_days=request.lookback_days,
-                )
-            )
-    except Exception as error:
-        _raise_data_operation_error(error)
+    return _enqueue_data_operation("prepare", request, db)
 
 
-@router.post("/operations/sync-daily", response_model=DataOperationRead)
+@router.post("/operations/sync-daily", response_model=DataOperationRead, status_code=202)
 def sync_imported_fund_daily_data(
     request: DataOperationRequest,
     db: DbSession,
 ) -> DataOperationRead:
-    try:
-        with operation_guard("sync-daily"):
-            codes, raw_root = _data_operation_inputs(db, request)
-            return _data_operation_response(
-                sync_daily_data(
-                    db,
-                    raw_root,
-                    fund_codes=codes,
-                    lookback_days=request.lookback_days,
-                )
-            )
-    except Exception as error:
-        _raise_data_operation_error(error)
+    return _enqueue_data_operation("sync-daily", request, db)
 
 
-@router.post("/operations/sync-sales-limits", response_model=DataOperationRead)
+@router.post("/operations/sync-sales-limits", response_model=DataOperationRead, status_code=202)
 def sync_imported_fund_sales_limits(
     request: DataOperationRequest,
     db: DbSession,
 ) -> DataOperationRead:
-    try:
-        with operation_guard("sync-sales-limits"):
-            codes, raw_root = _data_operation_inputs(db, request)
-            return _data_operation_response(
-                sync_sales_limits_data(db, raw_root, fund_codes=codes)
-            )
-    except Exception as error:
-        _raise_data_operation_error(error)
+    return _enqueue_data_operation("sync-sales-limits", request, db)
 
 
-@router.post("/operations/sync-reports", response_model=DataOperationRead)
+@router.post("/operations/sync-reports", response_model=DataOperationRead, status_code=202)
 def sync_imported_fund_reports(
     request: DataOperationRequest,
     db: DbSession,
 ) -> DataOperationRead:
-    try:
-        with operation_guard("sync-reports"):
-            codes, raw_root = _data_operation_inputs(db, request)
-            year, quarter = latest_completed_quarter()
-            return _data_operation_response(
-                sync_reports_data(
-                    db,
-                    raw_root,
-                    fund_codes=codes,
-                    year=year,
-                    quarter=quarter,
-                )
-            )
-    except Exception as error:
-        _raise_data_operation_error(error)
+    return _enqueue_data_operation("sync-reports", request, db)
 
 
-@router.post("/operations/parse-reports", response_model=DataOperationRead)
+@router.post("/operations/parse-reports", response_model=DataOperationRead, status_code=202)
 def parse_imported_fund_reports(
     request: DataOperationRequest,
     db: DbSession,
 ) -> DataOperationRead:
-    try:
-        with operation_guard("parse-reports"):
-            codes, raw_root = _data_operation_inputs(db, request)
-            year, quarter = latest_completed_quarter()
-            return _data_operation_response(
-                parse_reports_data(
-                    db,
-                    raw_root,
-                    fund_codes=codes,
-                    year=year,
-                    quarter=quarter,
-                )
-            )
-    except Exception as error:
-        _raise_data_operation_error(error)
+    return _enqueue_data_operation("parse-reports", request, db)
 
 
 @router.get("/purchase-limit-coverage", response_model=PurchaseLimitCoverageRead)
@@ -1745,7 +1707,7 @@ def list_data_quality_issues(
     severity: str | None = None,
     fund_id: int | None = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 200,
-) -> list[DataQualityIssue]:
+) -> list[dict[str, object]]:
     query = select(DataQualityIssue)
     if status:
         query = query.where(DataQualityIssue.status == status)
@@ -1753,4 +1715,132 @@ def list_data_quality_issues(
         query = query.where(DataQualityIssue.severity == severity)
     if fund_id is not None:
         query = query.where(DataQualityIssue.fund_contract_id == fund_id)
-    return list(db.scalars(query.order_by(DataQualityIssue.detected_at.desc()).limit(limit)).all())
+    issues = list(
+        db.scalars(query.order_by(DataQualityIssue.detected_at.desc()).limit(limit)).all()
+    )
+    return _quality_issue_rows(db, issues)
+
+
+def _quality_issue_rows(db: Session, issues: list[DataQualityIssue]) -> list[dict[str, object]]:
+    """Add user-facing fund identity and traceable public sources to issue rows."""
+
+    contract_ids = {item.fund_contract_id for item in issues if item.fund_contract_id}
+    report_ids = {item.fund_report_id for item in issues if item.fund_report_id}
+    share_ids = {item.fund_share_id for item in issues if item.fund_share_id}
+    run_ids = {item.ingestion_run_id for item in issues if item.ingestion_run_id}
+
+    reports = (
+        {
+            item.id: item
+            for item in db.scalars(select(FundReport).where(FundReport.id.in_(report_ids)))
+        }
+        if report_ids
+        else {}
+    )
+    shares = (
+        {item.id: item for item in db.scalars(select(FundShare).where(FundShare.id.in_(share_ids)))}
+        if share_ids
+        else {}
+    )
+    contract_ids.update(item.fund_contract_id for item in reports.values())
+    contract_ids.update(item.fund_contract_id for item in shares.values())
+    contracts = (
+        {
+            item.id: item
+            for item in db.scalars(select(FundContract).where(FundContract.id.in_(contract_ids)))
+        }
+        if contract_ids
+        else {}
+    )
+
+    artifact_filters: list[ColumnElement[bool]] = []
+    if contract_ids:
+        artifact_filters.append(SourceArtifact.fund_contract_id.in_(contract_ids))
+    if report_ids:
+        artifact_filters.append(SourceArtifact.fund_report_id.in_(report_ids))
+    if share_ids:
+        artifact_filters.append(SourceArtifact.fund_share_id.in_(share_ids))
+    if run_ids:
+        artifact_filters.append(SourceArtifact.ingestion_run_id.in_(run_ids))
+    artifacts = (
+        list(
+            db.scalars(
+                select(SourceArtifact)
+                .where(or_(*artifact_filters))
+                .order_by(SourceArtifact.fetched_at.desc())
+            )
+        )
+        if artifact_filters
+        else []
+    )
+
+    rows: list[dict[str, object]] = []
+    for issue in issues:
+        report = reports.get(issue.fund_report_id) if issue.fund_report_id else None
+        share = shares.get(issue.fund_share_id) if issue.fund_share_id else None
+        fund_id = issue.fund_contract_id
+        if fund_id is None and report is not None:
+            fund_id = report.fund_contract_id
+        if fund_id is None and share is not None:
+            fund_id = share.fund_contract_id
+        fund = contracts.get(fund_id) if fund_id else None
+        urls = _urls_in_value(issue.details)
+        if report is not None:
+            urls.extend([report.source_page_url, report.document_url])
+        for artifact in artifacts:
+            if not _artifact_matches_issue(artifact, issue, fund_id):
+                continue
+            urls.append(artifact.source_url)
+            urls.extend(_urls_in_value(artifact.metadata_json))
+        rows.append(
+            {
+                **DataQualityIssueRead.model_validate(issue).model_dump(),
+                "representative_code": fund.representative_code if fund else None,
+                "fund_name": fund.canonical_name if fund else None,
+                "source_urls": list(dict.fromkeys(url for url in urls if _is_public_url(url)))[:5],
+            }
+        )
+    return rows
+
+
+def _artifact_matches_issue(
+    artifact: SourceArtifact, issue: DataQualityIssue, fund_id: int | None
+) -> bool:
+    if issue.issue_code.startswith("SALES_LIMIT_") and not artifact.artifact_type.startswith(
+        "PURCHASE_LIMIT_"
+    ):
+        return False
+    if issue.fund_report_id is not None:
+        return artifact.fund_report_id == issue.fund_report_id
+    if issue.fund_share_id is not None:
+        return artifact.fund_share_id == issue.fund_share_id or (
+            artifact.fund_share_id is None
+            and artifact.fund_report_id is None
+            and fund_id is not None
+            and artifact.fund_contract_id == fund_id
+        )
+    if fund_id is not None:
+        return artifact.fund_contract_id == fund_id
+    return (
+        issue.ingestion_run_id is not None and artifact.ingestion_run_id == issue.ingestion_run_id
+    )
+
+
+def _urls_in_value(value: object) -> list[str | None]:
+    if isinstance(value, str):
+        return [value] if _is_public_url(value) else []
+    if isinstance(value, dict):
+        urls: list[str | None] = []
+        for item in value.values():
+            urls.extend(_urls_in_value(item))
+        return urls
+    if isinstance(value, list):
+        urls = []
+        for item in value:
+            urls.extend(_urls_in_value(item))
+        return urls
+    return []
+
+
+def _is_public_url(value: object) -> bool:
+    return isinstance(value, str) and value.startswith(("https://", "http://"))

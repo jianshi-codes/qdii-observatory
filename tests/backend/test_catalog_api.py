@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.app.api import get_fund_catalog_provider
@@ -14,7 +14,7 @@ from backend.app.ingestion.providers.base import (
     PublicFundCandidate,
 )
 from backend.app.ingestion.storage import StoragePreflightError
-from backend.app.models import FundContract, SourceArtifact
+from backend.app.models import FundContract, FundShare, SourceArtifact
 
 
 class FakeCatalogProvider:
@@ -57,6 +57,33 @@ class FakeCatalogProvider:
         )
 
 
+class FakeGroupedCatalogProvider(FakeCatalogProvider):
+    def lookup(self, fund_code: str) -> FundCatalogSnapshot:
+        names = {
+            "900001": "示例全球科技股票(QDII)A",
+            "900002": "示例全球科技股票(QDII)C",
+        }
+        name = names[fund_code]
+        return FundCatalogSnapshot(
+            candidates=(
+                PublicFundCandidate(
+                    fund_code=fund_code,
+                    fund_name=name,
+                    manager_code="80009999",
+                    manager_name="示例基金",
+                    category="QDII-普通股票",
+                    research_scope="TECHNOLOGY",
+                    currency="CNY",
+                    wrapper_type="DIRECT",
+                    source_url=f"https://example.invalid/public-fund/{fund_code}",
+                ),
+            ),
+            raw_payload=f'{{"fund_code":"{fund_code}"}}'.encode(),
+            source_url=f"https://example.invalid/public-fund/{fund_code}",
+            mime_type="application/json",
+        )
+
+
 def test_catalog_api_supports_choices_lookup_and_explicit_import(
     client: TestClient,
     db_session: Session,
@@ -85,9 +112,7 @@ def test_catalog_api_supports_choices_lookup_and_explicit_import(
     imported = client.post("/api/fund-catalog/import", json={"fund_codes": ["900001"]})
 
     assert options.status_code == 200
-    assert options.json()["companies"] == [
-        {"company_code": "80009999", "company_name": "示例基金"}
-    ]
+    assert options.json()["companies"] == [{"company_code": "80009999", "company_name": "示例基金"}]
     assert options.json()["source_categories"][1] == {
         "value": "311",
         "label": "全球股票",
@@ -124,8 +149,28 @@ def test_catalog_import_reports_unavailable_raw_storage(
 
     assert response.status_code == 503
     assert response.json() == {
-        "detail": (
-            "Raw data storage is unavailable: "
-            "QDII_RAW_DATA_DIR does not exist: /data/raw"
-        )
+        "detail": ("Raw data storage is unavailable: QDII_RAW_DATA_DIR does not exist: /data/raw")
     }
+
+
+def test_catalog_import_groups_share_classes_even_when_c_is_imported_first(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("backend.app.api.raw_data_dir", lambda: tmp_path / "raw")
+    client.app.dependency_overrides[get_fund_catalog_provider] = FakeGroupedCatalogProvider
+
+    response = client.post(
+        "/api/fund-catalog/import",
+        json={"fund_codes": ["900002", "900001"]},
+    )
+
+    assert response.status_code == 200
+    assert db_session.scalar(select(func.count(FundContract.id))) == 1
+    contract = db_session.scalar(select(FundContract))
+    assert contract is not None
+    assert contract.representative_code == "900001"
+    assert contract.canonical_name.endswith("A")
+    assert set(db_session.scalars(select(FundShare.share_code))) == {"900001", "900002"}
