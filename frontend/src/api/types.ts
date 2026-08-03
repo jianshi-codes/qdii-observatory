@@ -362,6 +362,37 @@ export interface IngestionRun {
   [key: string]: unknown
 }
 
+export type DataOperationName =
+  | 'prepare'
+  | 'sync-daily'
+  | 'sync-sales-limits'
+  | 'sync-reports'
+  | 'parse-reports'
+
+export interface DataOperationResult {
+  operation: string
+  status: 'succeeded' | 'partial' | 'failed'
+  fund_codes: string[]
+  report_year: number | null
+  report_quarter: number | null
+  lookthrough_reports: number | null
+  runs: IngestionRun[]
+}
+
+export interface DataPreparationStatus {
+  active_operation: DataOperationName | null
+  total_funds: number
+  nav_ready_funds: number
+  latest_nav_date: string | null
+  limit_ready_funds: number
+  latest_limit_snapshot_date: string | null
+  report_year: number
+  report_quarter: number
+  report_downloaded_funds: number
+  report_parsed_funds: number
+  lookthrough_ready_funds: number
+}
+
 export interface DataQualityIssue {
   id: Identifier
   issue_type?: string | null

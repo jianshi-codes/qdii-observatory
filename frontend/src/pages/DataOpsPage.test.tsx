@@ -12,6 +12,22 @@ function response(body: unknown) {
   }))
 }
 
+function preparationStatus(totalFunds = 0) {
+  return {
+    active_operation: null,
+    total_funds: totalFunds,
+    nav_ready_funds: 0,
+    latest_nav_date: null,
+    limit_ready_funds: 0,
+    latest_limit_snapshot_date: null,
+    report_year: 2026,
+    report_quarter: 2,
+    report_downloaded_funds: 0,
+    report_parsed_funds: 0,
+    lookthrough_ready_funds: 0,
+  }
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -55,6 +71,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
         cap_state_counts: { LIMITED: 2, UNLIMITED: 1, UNKNOWN: 2 },
       })
       if (path === '/api/provider-health') return response({ items: [] })
+      if (path === '/api/operations/preparation-status') return response(preparationStatus(2))
       if (path === '/api/fund-catalog/options') return response({
         companies: [],
         source_categories: [{ value: 'ALL', label: '全部来源分类' }],
@@ -97,6 +114,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
         cap_state_counts: {},
       })
       if (path === '/api/provider-health') return response({ items: [] })
+      if (path === '/api/operations/preparation-status') return response(preparationStatus())
       if (path === '/api/fund-catalog/options') return response({
         companies: [{ company_code: '80009999', company_name: '示例基金' }],
         source_categories: [
@@ -192,6 +210,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
         priority: 5,
         status: 'UNKNOWN',
       }] })
+      if (path === '/api/operations/preparation-status') return response(preparationStatus())
       if (path === '/api/fund-catalog/options') return response({
         companies: [],
         source_categories: [{ value: 'ALL', label: '全部来源分类' }],
@@ -209,5 +228,80 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(screen.getByText('UNKNOWN')).toBeInTheDocument()
     expect(container.querySelector('.provider-health-row')).toBeInTheDocument()
     expect(container.querySelector('.provider-health-row.run-row')).not.toBeInTheDocument()
+  })
+
+  it('guides the user from imported funds into an explicit preparation workflow', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/funds') return response({ items: [{
+        id: 1,
+        canonical_name: '示例全球科技基金',
+        manager_name: '示例基金',
+        representative_code: '900001',
+      }] })
+      if (path === '/api/ingestion-runs') return response({ items: [] })
+      if (path === '/api/data-quality-issues') return response({ items: [] })
+      if (path === '/api/purchase-limit-coverage') return response({
+        total_funds: 1,
+        covered_funds: 0,
+        total_shares: 1,
+        covered_shares: 0,
+        latest_snapshot_date: null,
+        availability_state_counts: {},
+        cap_state_counts: {},
+      })
+      if (path === '/api/provider-health') return response({ items: [] })
+      if (path === '/api/operations/preparation-status') return response(preparationStatus(1))
+      if (path === '/api/fund-catalog/options') return response({
+        companies: [],
+        source_categories: [{ value: 'ALL', label: '全部来源分类' }],
+        research_scopes: [{ value: 'ALL', label: '全部 QDII' }],
+        source_provider: 'fixture',
+        source_notice: '公开来源提示',
+      })
+      if (path === '/api/operations/prepare') {
+        expect(init?.method).toBe('POST')
+        expect(init?.body).toBe(JSON.stringify({ fund_codes: [], lookback_days: 10 }))
+        return response({
+          operation: 'prepare_data',
+          status: 'partial',
+          fund_codes: ['900001'],
+          report_year: 2026,
+          report_quarter: 2,
+          lookthrough_reports: 0,
+          runs: [{
+            id: 9,
+            job_type: 'sync_nav',
+            status: 'partial',
+            parameters: {},
+            started_at: '2026-08-03T01:00:00Z',
+            finished_at: '2026-08-03T01:01:00Z',
+            records_seen: 1,
+            records_written: 2,
+            records_failed: 1,
+            error_message: null,
+          }],
+        })
+      }
+      throw new Error(`unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByRole('heading', { name: '数据准备向导' })).toBeInTheDocument()
+    expect(screen.getByText('净值与价格')).toBeInTheDocument()
+    expect(screen.getByText('穿透计算')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '解析报告并计算穿透' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: '开始准备 1 只基金数据' }))
+
+    expect(await screen.findByText('任务结果：部分完成')).toBeInTheDocument()
+    expect(screen.getByText('1 只基金 · 1 个子任务')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/operations/prepare',
+      expect.objectContaining({ method: 'POST' }),
+    )
   })
 })

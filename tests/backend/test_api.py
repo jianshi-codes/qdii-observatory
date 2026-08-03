@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from backend.app import api as api_module
+from backend.app.data_operations import DataOperationResult, operation_guard
 from backend.app.models import (
     DailyExchangePrice,
     DailyExchangeRate,
@@ -757,6 +760,107 @@ def test_compare_and_operations_endpoints(client: TestClient, seeded: dict[str, 
     assert runs.json()[0]["records_seen"] == 51
     assert issues.status_code == 200
     assert issues.json()[0]["issue_code"] == "LOW_PARSE_CONFIDENCE"
+
+
+def test_data_preparation_status_reports_each_ready_stage(
+    client: TestClient,
+    seeded: dict[str, int],
+) -> None:
+    response = client.get("/api/operations/preparation-status")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload == {
+        "active_operation": None,
+        "total_funds": 2,
+        "nav_ready_funds": 2,
+        "latest_nav_date": "2026-07-30",
+        "limit_ready_funds": 2,
+        "latest_limit_snapshot_date": "2026-07-31",
+        "report_year": 2026,
+        "report_quarter": 2,
+        "report_downloaded_funds": 2,
+        "report_parsed_funds": 2,
+        "lookthrough_ready_funds": 2,
+    }
+
+
+def test_prepare_operation_is_explicit_scoped_and_returns_component_runs(
+    client: TestClient,
+    db_session: Session,
+    seeded: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_prepare(
+        session: Session,
+        raw_root: Path,
+        **kwargs: object,
+    ) -> DataOperationResult:
+        captured.update(session=session, raw_root=raw_root, kwargs=kwargs)
+        run = IngestionRun(
+            job_type="sync_nav",
+            status="succeeded",
+            parameters={"source": "test"},
+            records_seen=1,
+            records_written=1,
+            records_failed=0,
+        )
+        session.add(run)
+        session.commit()
+        return DataOperationResult(
+            operation="prepare_data",
+            status="succeeded",
+            fund_codes=("000834",),
+            runs=(run,),
+            report_year=2026,
+            report_quarter=2,
+            lookthrough_reports=1,
+        )
+
+    monkeypatch.setattr(api_module, "raw_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(api_module, "prepare_data", fake_prepare)
+
+    response = client.post(
+        "/api/operations/prepare",
+        json={"fund_codes": ["000834"], "lookback_days": 10},
+    )
+
+    assert response.status_code == 200, response.text
+    assert captured["session"] is db_session
+    assert captured["raw_root"] == tmp_path
+    assert captured["kwargs"] == {
+        "fund_codes": ("000834",),
+        "year": 2026,
+        "quarter": 2,
+        "lookback_days": 10,
+    }
+    assert response.json()["runs"][0]["job_type"] == "sync_nav"
+    assert response.json()["lookthrough_reports"] == 1
+
+
+def test_data_operation_rejects_unknown_fund_and_concurrent_run(
+    client: TestClient,
+    seeded: dict[str, int],
+) -> None:
+    unknown = client.post(
+        "/api/operations/sync-sales-limits",
+        json={"fund_codes": ["999999"]},
+    )
+    assert unknown.status_code == 404
+
+    with operation_guard("sync-reports"):
+        active = client.get("/api/operations/preparation-status")
+        concurrent = client.post(
+            "/api/operations/sync-sales-limits",
+            json={"fund_codes": ["000834"]},
+        )
+    assert active.status_code == 200
+    assert active.json()["active_operation"] == "sync-reports"
+    assert concurrent.status_code == 409
+    assert concurrent.json()["detail"] == "another data operation is already running"
 
 
 def test_filters_validation_and_not_found(client: TestClient, seeded: dict[str, int]) -> None:

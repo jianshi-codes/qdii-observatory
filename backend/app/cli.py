@@ -230,22 +230,9 @@ def _load_demo(args: argparse.Namespace) -> int:
 
 
 def _provider_client(*names: str) -> Any:
-    from backend.app.ingestion.http import ProviderHttpClient, RetryPolicy
-    from backend.app.ingestion.provider_registry import load_provider_registry
+    from backend.app.ingestion.provider_registry import provider_client
 
-    registry = load_provider_registry()
-    selected = [registry[name] for name in names if name in registry]
-    disabled = [config.name for config in selected if not config.enabled]
-    if disabled:
-        raise ValueError(f"providers are disabled: {disabled}")
-    if not selected:
-        return ProviderHttpClient()
-    return ProviderHttpClient(
-        timeout_seconds=max(config.timeout_seconds for config in selected),
-        min_interval_seconds=max(1 / config.rate_limit_per_second for config in selected),
-        retry=RetryPolicy(attempts=max(config.retry_attempts for config in selected)),
-        user_agent=selected[0].user_agent,
-    )
+    return provider_client(*names)
 
 
 def _storage_preflight(args: argparse.Namespace) -> int:

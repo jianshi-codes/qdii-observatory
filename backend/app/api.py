@@ -8,17 +8,37 @@ from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from itertools import combinations
 from math import sqrt
-from typing import Annotated, Literal, cast
+from pathlib import Path as FilePath
+from typing import Annotated, Literal, NoReturn, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from backend.app.data_operations import (
+    DataOperationResult,
+    NoSelectedFundsError,
+    OperationInProgressError,
+    UnknownFundCodesError,
+    latest_completed_quarter,
+    operation_guard,
+    parse_reports_data,
+    preparation_status,
+    prepare_data,
+    selected_fund_codes,
+    sync_daily_data,
+    sync_reports_data,
+    sync_sales_limits_data,
+)
 from backend.app.database import get_db
 from backend.app.ingestion.catalog_pipeline import import_public_funds
 from backend.app.ingestion.http import ProviderHttpClient, ProviderHttpError, RetryPolicy
-from backend.app.ingestion.provider_registry import load_provider_registry, provider_status
+from backend.app.ingestion.provider_registry import (
+    ProviderConfigurationError,
+    load_provider_registry,
+    provider_status,
+)
 from backend.app.ingestion.providers.base import FundCatalogProvider, ProviderSchemaError
 from backend.app.ingestion.providers.catalog import (
     RESEARCH_SCOPES,
@@ -51,6 +71,9 @@ from backend.app.schemas import (
     CompareFundExposureRead,
     CompareNavSeriesRead,
     CompareRead,
+    DataOperationRead,
+    DataOperationRequest,
+    DataPreparationStatusRead,
     DataQualityIssueRead,
     DerivedMetricsRead,
     ExchangePriceRead,
@@ -609,6 +632,144 @@ def import_selected_public_funds(
         imported_codes=list(result.imported_codes),
         failures=result.failures,
     )
+
+
+def _data_operation_response(result: DataOperationResult) -> DataOperationRead:
+    return DataOperationRead(
+        operation=result.operation,
+        status=result.status,
+        fund_codes=list(result.fund_codes),
+        report_year=result.report_year,
+        report_quarter=result.report_quarter,
+        lookthrough_reports=result.lookthrough_reports,
+        runs=[IngestionRunRead.model_validate(run) for run in result.runs],
+    )
+
+
+def _data_operation_inputs(
+    db: Session,
+    request: DataOperationRequest,
+) -> tuple[tuple[str, ...], FilePath]:
+    return selected_fund_codes(db, set(request.fund_codes) or None), raw_data_dir()
+
+
+def _raise_data_operation_error(error: Exception) -> NoReturn:
+    if isinstance(error, OperationInProgressError):
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if isinstance(error, NoSelectedFundsError):
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if isinstance(error, UnknownFundCodesError):
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if isinstance(error, (StoragePreflightError, ProviderConfigurationError)):
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    raise error
+
+
+@router.get("/operations/preparation-status", response_model=DataPreparationStatusRead)
+def get_data_preparation_status(db: DbSession) -> DataPreparationStatusRead:
+    return DataPreparationStatusRead.model_validate(preparation_status(db))
+
+
+@router.post("/operations/prepare", response_model=DataOperationRead)
+def prepare_imported_fund_data(
+    request: DataOperationRequest,
+    db: DbSession,
+) -> DataOperationRead:
+    try:
+        with operation_guard("prepare"):
+            codes, raw_root = _data_operation_inputs(db, request)
+            year, quarter = latest_completed_quarter()
+            return _data_operation_response(
+                prepare_data(
+                    db,
+                    raw_root,
+                    fund_codes=codes,
+                    year=year,
+                    quarter=quarter,
+                    lookback_days=request.lookback_days,
+                )
+            )
+    except Exception as error:
+        _raise_data_operation_error(error)
+
+
+@router.post("/operations/sync-daily", response_model=DataOperationRead)
+def sync_imported_fund_daily_data(
+    request: DataOperationRequest,
+    db: DbSession,
+) -> DataOperationRead:
+    try:
+        with operation_guard("sync-daily"):
+            codes, raw_root = _data_operation_inputs(db, request)
+            return _data_operation_response(
+                sync_daily_data(
+                    db,
+                    raw_root,
+                    fund_codes=codes,
+                    lookback_days=request.lookback_days,
+                )
+            )
+    except Exception as error:
+        _raise_data_operation_error(error)
+
+
+@router.post("/operations/sync-sales-limits", response_model=DataOperationRead)
+def sync_imported_fund_sales_limits(
+    request: DataOperationRequest,
+    db: DbSession,
+) -> DataOperationRead:
+    try:
+        with operation_guard("sync-sales-limits"):
+            codes, raw_root = _data_operation_inputs(db, request)
+            return _data_operation_response(
+                sync_sales_limits_data(db, raw_root, fund_codes=codes)
+            )
+    except Exception as error:
+        _raise_data_operation_error(error)
+
+
+@router.post("/operations/sync-reports", response_model=DataOperationRead)
+def sync_imported_fund_reports(
+    request: DataOperationRequest,
+    db: DbSession,
+) -> DataOperationRead:
+    try:
+        with operation_guard("sync-reports"):
+            codes, raw_root = _data_operation_inputs(db, request)
+            year, quarter = latest_completed_quarter()
+            return _data_operation_response(
+                sync_reports_data(
+                    db,
+                    raw_root,
+                    fund_codes=codes,
+                    year=year,
+                    quarter=quarter,
+                )
+            )
+    except Exception as error:
+        _raise_data_operation_error(error)
+
+
+@router.post("/operations/parse-reports", response_model=DataOperationRead)
+def parse_imported_fund_reports(
+    request: DataOperationRequest,
+    db: DbSession,
+) -> DataOperationRead:
+    try:
+        with operation_guard("parse-reports"):
+            codes, raw_root = _data_operation_inputs(db, request)
+            year, quarter = latest_completed_quarter()
+            return _data_operation_response(
+                parse_reports_data(
+                    db,
+                    raw_root,
+                    fund_codes=codes,
+                    year=year,
+                    quarter=quarter,
+                )
+            )
+    except Exception as error:
+        _raise_data_operation_error(error)
 
 
 @router.get("/purchase-limit-coverage", response_model=PurchaseLimitCoverageRead)

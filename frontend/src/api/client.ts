@@ -1,6 +1,9 @@
 import type {
   ComparePayload,
   DataQualityIssue,
+  DataOperationName,
+  DataOperationResult,
+  DataPreparationStatus,
   ExposureItem,
   FundDetail,
   FundCatalogCandidates,
@@ -210,6 +213,18 @@ export const api = {
     request<PurchaseLimitCoverage>('/api/purchase-limit-coverage', signal),
   providerHealth: (signal?: AbortSignal) =>
     requestCollection<ProviderHealth>('/api/provider-health', ['providers'], signal),
+  dataPreparationStatus: (signal?: AbortSignal) =>
+    request<DataPreparationStatus>('/api/operations/preparation-status', signal),
+  runDataOperation: (
+    operation: DataOperationName,
+    fundCodes: string[] = [],
+    lookbackDays = 10,
+    signal?: AbortSignal,
+  ) => request<DataOperationResult>(`/api/operations/${operation}`, signal, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fund_codes: fundCodes, lookback_days: lookbackDays }),
+  }),
   fundCatalogOptions: (signal?: AbortSignal) =>
     request<FundCatalogOptions>('/api/fund-catalog/options', signal),
   fundCatalogCandidates: (filters: {

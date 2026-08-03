@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ApiModel(BaseModel):
@@ -496,6 +496,46 @@ class IngestionRunRead(ApiModel):
     records_written: int
     records_failed: int
     error_message: str | None
+
+
+class DataOperationRequest(ApiModel):
+    fund_codes: list[str] = Field(default_factory=list)
+    lookback_days: int = Field(default=10, ge=1, le=30)
+
+    @field_validator("fund_codes")
+    @classmethod
+    def validate_fund_codes(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        invalid = [value for value in normalized if len(value) != 6 or not value.isdigit()]
+        if invalid:
+            raise ValueError(f"fund codes must contain exactly six digits: {invalid}")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("fund codes must not contain duplicates")
+        return normalized
+
+
+class DataOperationRead(ApiModel):
+    operation: str
+    status: str
+    fund_codes: list[str]
+    report_year: int | None = None
+    report_quarter: int | None = None
+    lookthrough_reports: int | None = None
+    runs: list[IngestionRunRead]
+
+
+class DataPreparationStatusRead(ApiModel):
+    active_operation: str | None
+    total_funds: int
+    nav_ready_funds: int
+    latest_nav_date: date | None
+    limit_ready_funds: int
+    latest_limit_snapshot_date: date | None
+    report_year: int
+    report_quarter: int
+    report_downloaded_funds: int
+    report_parsed_funds: int
+    lookthrough_ready_funds: int
 
 
 class DataQualityIssueRead(ApiModel):

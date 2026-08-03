@@ -1,6 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   AlertCircle,
+  CheckCircle2,
+  CircleDashed,
   Clock3,
   Database,
   Download,
@@ -20,6 +22,9 @@ import type { CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type {
+  DataOperationName,
+  DataOperationResult,
+  DataPreparationStatus,
   DataQualityIssue,
   FundSummary,
   IngestionRun,
@@ -90,8 +95,24 @@ export function DataOpsPage() {
     queryFn: ({ signal }) => api.providerHealth(signal),
     refetchInterval: 30_000,
   })
+  const preparationQuery = useQuery({
+    queryKey: ['data-preparation-status'],
+    queryFn: ({ signal }) => api.dataPreparationStatus(signal),
+    refetchInterval: 30_000,
+  })
+  const operationMutation = useMutation({
+    mutationFn: ({ operation, fundCodes = [] }: {
+      operation: DataOperationName
+      fundCodes?: string[]
+    }) => api.runDataOperation(operation, fundCodes),
+    onSuccess: () => refreshAll(),
+  })
 
   const funds = fundsQuery.data ?? []
+  const activeOperation = operationMutation.variables?.operation
+    ?? preparationQuery.data?.active_operation
+    ?? undefined
+  const operationBusy = operationMutation.isPending || Boolean(preparationQuery.data?.active_operation)
   const runs = [...(runsQuery.data ?? [])].sort((a, b) => String(b.started_at ?? '').localeCompare(String(a.started_at ?? '')))
   const issues = [...(issuesQuery.data ?? [])].sort((a, b) => String(b.detected_at ?? b.created_at ?? '').localeCompare(String(a.detected_at ?? a.created_at ?? '')))
   const parsedCount = funds.filter(isParsed).length
@@ -106,7 +127,9 @@ export function DataOpsPage() {
     ? limitCoverage.covered_shares / limitCoverage.total_shares * 100
     : null
   const lastRun = runs[0]
-  const anyPending = fundsQuery.isPending || runsQuery.isPending || issuesQuery.isPending || limitCoverageQuery.isPending || providerHealthQuery.isPending
+  const anyPending = fundsQuery.isPending || runsQuery.isPending || issuesQuery.isPending
+    || limitCoverageQuery.isPending || providerHealthQuery.isPending || preparationQuery.isPending
+    || operationMutation.isPending
 
   function refreshAll() {
     void Promise.all([
@@ -115,7 +138,12 @@ export function DataOpsPage() {
       issuesQuery.refetch(),
       limitCoverageQuery.refetch(),
       providerHealthQuery.refetch(),
+      preparationQuery.refetch(),
     ])
+  }
+
+  function runOperation(operation: DataOperationName, fundCodes: string[] = []) {
+    operationMutation.mutate({ operation, fundCodes })
   }
 
   return (
@@ -132,6 +160,18 @@ export function DataOpsPage() {
       </section>
 
       <CatalogImportPanel onImported={refreshAll} />
+
+      <DataPreparationPanel
+        status={preparationQuery.data}
+        pending={preparationQuery.isPending}
+        error={preparationQuery.error}
+        operationBusy={operationBusy}
+        activeOperation={activeOperation}
+        result={operationMutation.data}
+        operationError={operationMutation.error}
+        onRefresh={() => preparationQuery.refetch()}
+        onRun={runOperation}
+      />
 
       <section className="ops-stat-grid" aria-label="数据运维摘要">
         <article className="ops-stat ops-stat-coverage">
@@ -259,7 +299,7 @@ export function DataOpsPage() {
         </div>
         {fundsQuery.isPending && <LoadingPanel label="载入覆盖清单…" />}
         {fundsQuery.isError && <ErrorPanel error={fundsQuery.error} onRetry={() => fundsQuery.refetch()} />}
-        {fundsQuery.isSuccess && funds.length === 0 && <EmptyPanel title="覆盖清单为空" detail="尚未导入 CSV、XLSX 或 JSON universe；不会用占位数据伪造覆盖。" />}
+        {fundsQuery.isSuccess && funds.length === 0 && <EmptyPanel title="覆盖清单为空" detail="请先从公开信息选择基金、输入基金代码，或使用高级批量模板导入。" />}
         {fundsQuery.isSuccess && funds.length > 0 && (
           <div className="data-table-wrap">
             <table className="data-table coverage-table">
@@ -277,10 +317,11 @@ export function DataOpsPage() {
                     <button
                       className="button button-quiet"
                       type="button"
-                      disabled
-                      title="当前最小 API 未定义写操作；请使用后端单基金 CLI 重跑"
+                      disabled={operationBusy}
+                      title="同步该基金的日常数据、最近季度报告并重新计算穿透"
+                      onClick={() => runOperation('prepare', [fund.representative_code])}
                     >
-                      <Play size={14} />重跑
+                      <Play size={14} />补齐数据
                     </button>
                   </td>
                 </tr>
@@ -290,7 +331,7 @@ export function DataOpsPage() {
         )}
         <div className="operation-note">
           <ServerCog size={17} />
-          <p><strong>重跑操作尚未由只读 MVP API 暴露。</strong> 为避免猜测写接口，按钮保持禁用；可使用后端 CLI 按基金执行，待明确重跑端点后再接通。</p>
+          <p><strong>“补齐数据”只处理这一只已导入基金。</strong> 它会同步近 10 天日常数据、获取最近已结束季度报告并重新解析穿透；所有结果仍记录在 ingestion run 中。</p>
         </div>
       </section>
 
@@ -300,6 +341,120 @@ export function DataOpsPage() {
         <IssuePanel title="限额抓取与渠道覆盖" kicker="SALES LIMIT ISSUES" issues={limitIssues} pending={issuesQuery.isPending} error={issuesQuery.error} onRetry={() => issuesQuery.refetch()} />
       </div>
     </div>
+  )
+}
+
+function DataPreparationPanel({
+  status,
+  pending,
+  error,
+  operationBusy,
+  activeOperation,
+  result,
+  operationError,
+  onRefresh,
+  onRun,
+}: {
+  status: DataPreparationStatus | undefined
+  pending: boolean
+  error: unknown
+  operationBusy: boolean
+  activeOperation: DataOperationName | undefined
+  result: DataOperationResult | undefined
+  operationError: unknown
+  onRefresh: () => void
+  onRun: (operation: DataOperationName, fundCodes?: string[]) => void
+}) {
+  if (pending) return <section className="panel"><LoadingPanel label="计算基金数据准备状态…" /></section>
+  if (error) return <section className="panel"><ErrorPanel error={error} onRetry={onRefresh} /></section>
+  if (!status) return null
+
+  const total = status.total_funds
+  const stages = [
+    { key: 'funds', label: '基金清单', ready: total, detail: total ? '基础资料已写入本地 universe' : '先导入基金' },
+    { key: 'nav', label: '净值与价格', ready: status.nav_ready_funds, detail: status.latest_nav_date ? `最新 ${formatDate(status.latest_nav_date)}` : '尚未同步' },
+    { key: 'limits', label: '今日申购限额', ready: status.limit_ready_funds, detail: status.latest_limit_snapshot_date ? `快照 ${formatDate(status.latest_limit_snapshot_date)}` : '尚无快照' },
+    { key: 'reports', label: `${status.report_year} Q${status.report_quarter} 季报`, ready: status.report_downloaded_funds, detail: '最近已结束季度' },
+    { key: 'parsed', label: '报告解析', ready: status.report_parsed_funds, detail: '国家、行业与披露持仓' },
+    { key: 'lookthrough', label: '穿透计算', ready: status.lookthrough_ready_funds, detail: '不把未解析权重填成 0' },
+  ]
+  const fullyReady = total > 0 && stages.slice(1).every((stage) => stage.ready === total)
+  const activeLabels: Record<DataOperationName, string> = {
+    prepare: '正在准备全部数据…',
+    'sync-daily': '正在同步日常数据…',
+    'sync-sales-limits': '正在同步今日限额…',
+    'sync-reports': '正在获取季度报告…',
+    'parse-reports': '正在解析报告并计算穿透…',
+  }
+  const written = result?.runs.reduce((sum, run) => sum + (toNumber(run.records_written) ?? 0), 0) ?? 0
+  const failed = result?.runs.reduce((sum, run) => sum + (toNumber(run.records_failed) ?? 0), 0) ?? 0
+
+  return (
+    <section className="panel data-preparation" aria-labelledby="data-preparation-title">
+      <div className="panel-heading data-preparation-heading">
+        <div>
+          <span className="section-kicker">NEXT STEPS</span>
+          <h2 id="data-preparation-title">数据准备向导</h2>
+          <p>{total > 0
+            ? `已导入 ${total} 只基金。日常数据与季度报告可以独立同步；穿透需要先取得并解析报告。`
+            : '导入基金后，这里会引导完成净值、限额、季报和穿透数据。'}</p>
+        </div>
+        {fullyReady && <StatusBadge value="success" label="基础数据已就绪" />}
+      </div>
+
+      <div className="preparation-stage-grid">
+        {stages.map((stage) => {
+          const complete = total > 0 && stage.ready === total
+          return (
+            <article className={complete ? 'preparation-stage is-complete' : 'preparation-stage'} key={stage.key}>
+              {complete ? <CheckCircle2 size={18} /> : <CircleDashed size={18} />}
+              <div><span>{stage.label}</span><strong>{stage.ready} / {total}</strong><small>{stage.detail}</small></div>
+            </article>
+          )
+        })}
+      </div>
+
+      {total > 0 && (
+        <div className="preparation-actions">
+          <button className="button button-primary" type="button" disabled={operationBusy} onClick={() => onRun('prepare')}>
+            <Play size={15} />{fullyReady ? `更新全部 ${total} 只基金数据` : `开始准备 ${total} 只基金数据`}
+          </button>
+          <button className="button button-secondary" type="button" disabled={operationBusy} onClick={() => onRun('sync-daily')}>
+            同步日常数据
+          </button>
+          <button className="button button-secondary" type="button" disabled={operationBusy} onClick={() => onRun('sync-sales-limits')}>
+            仅同步今日限额
+          </button>
+          <button className="button button-secondary" type="button" disabled={operationBusy} onClick={() => onRun('sync-reports')}>
+            获取 {status.report_year} Q{status.report_quarter} 报告
+          </button>
+          <button className="button button-secondary" type="button" disabled={operationBusy || status.report_downloaded_funds === 0} onClick={() => onRun('parse-reports')}>
+            解析报告并计算穿透
+          </button>
+        </div>
+      )}
+
+      {operationBusy && activeOperation && (
+        <div className="preparation-running" role="status">
+          <RefreshCw size={16} className="spin" />
+          <div><strong>{activeLabels[activeOperation]}</strong><span>可在下方 ingestion run 查看逐项进度；请勿重复提交。</span></div>
+        </div>
+      )}
+      {Boolean(operationError) && <ErrorPanel compact error={operationError} />}
+      {result && !operationBusy && (
+        <div className={`preparation-result tone-${issueTone(result.status)}`} role="status">
+          <div><strong>任务结果：{statusLabel(result.status)}</strong><span>{result.fund_codes.length} 只基金 · {result.runs.length} 个子任务</span></div>
+          <div><strong>{written}</strong><span>写入</span><strong>{failed}</strong><span>失败</span></div>
+        </div>
+      )}
+
+      {total > 0 && (status.nav_ready_funds > 0 || status.report_parsed_funds > 0) && (
+        <div className="preparation-links">
+          <Link className="text-button" to="/">查看基金总览</Link>
+          {Math.max(status.nav_ready_funds, status.report_parsed_funds) >= 2 && <Link className="text-button" to="/compare">选择基金进行对比</Link>}
+        </div>
+      )}
+    </section>
   )
 }
 

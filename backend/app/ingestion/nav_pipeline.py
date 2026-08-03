@@ -357,6 +357,7 @@ def sync_daily(
     raw_root: Path,
     *,
     lookback_days: int = 10,
+    share_codes: set[str] | None = None,
 ) -> tuple[IngestionRun, IngestionRun]:
     end_date = date.today()
     start_date = end_date - timedelta(days=lookback_days)
@@ -366,6 +367,7 @@ def sync_daily(
         raw_root,
         start_date=start_date,
         end_date=end_date,
+        share_codes=share_codes,
     )
     market_run = sync_exchange_prices(
         session,
@@ -373,6 +375,7 @@ def sync_daily(
         raw_root,
         start_date=start_date,
         end_date=end_date,
+        share_codes=share_codes,
     )
     return nav_run, market_run
 

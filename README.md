@@ -70,6 +70,10 @@ qdii import-universe --file examples/universe.sample.csv
 
 ## 同步与解析最新季度
 
+导入基金后，打开“数据运维”页的“数据准备向导”。可以点击“开始准备”依次同步近 10 天净值、场内价格、当天申购限额、参考汇率，获取最近已结束季度报告，并解析报告与计算穿透；也可以分别执行每一步。页面会显示基金覆盖数、来源日期、子任务状态和失败数，单基金可在覆盖清单中点击“补齐数据”。同一时间只运行一个数据操作，重复提交会被拒绝。
+
+命令行入口继续保留，适合自动化或故障排查：
+
 ```bash
 qdii sync-reports --latest-quarter
 qdii parse-reports --latest-quarter

@@ -10,6 +10,8 @@ from typing import Any
 
 import yaml
 
+from backend.app.ingestion.http import ProviderHttpClient, RetryPolicy
+
 
 class ProviderHealth(StrEnum):
     HEALTHY = "HEALTHY"
@@ -21,6 +23,10 @@ class ProviderHealth(StrEnum):
 
 
 DEFAULT_USER_AGENT = "QDII-Observatory/0.1 (+local-first-research)"
+
+
+class ProviderConfigurationError(RuntimeError):
+    """Configured providers cannot support the requested operation."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,3 +80,22 @@ def _parse_provider(name: str, raw: dict[str, Any]) -> ProviderConfig:
 
 def provider_status(config: ProviderConfig) -> ProviderHealth:
     return ProviderHealth.UNKNOWN if config.enabled else ProviderHealth.DISABLED
+
+
+def provider_client(*names: str) -> ProviderHttpClient:
+    registry = load_provider_registry()
+    selected = [registry[name] for name in names if name in registry]
+    missing = [name for name in names if name not in registry]
+    if missing:
+        raise ProviderConfigurationError(f"providers are not configured: {missing}")
+    disabled = [config.name for config in selected if not config.enabled]
+    if disabled:
+        raise ProviderConfigurationError(f"providers are disabled: {disabled}")
+    if not selected:
+        return ProviderHttpClient()
+    return ProviderHttpClient(
+        timeout_seconds=max(config.timeout_seconds for config in selected),
+        min_interval_seconds=max(1 / config.rate_limit_per_second for config in selected),
+        retry=RetryPolicy(attempts=max(config.retry_attempts for config in selected)),
+        user_agent=selected[0].user_agent,
+    )

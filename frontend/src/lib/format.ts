@@ -142,6 +142,7 @@ export function statusLabel(value: unknown): string {
     failed_with_reason: '失败（有原因）',
     success: '成功',
     succeeded: '成功',
+    partial: '部分完成',
     completed: '已完成',
     running: '运行中',
     pending: '等待中',
