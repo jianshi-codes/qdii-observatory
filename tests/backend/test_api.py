@@ -558,6 +558,57 @@ def test_all_fund_read_endpoints(client: TestClient, seeded: dict[str, int]) -> 
     assert len(responses["purchase_limits"].json()["items"]) == 2
 
 
+def test_provider_health_uses_latest_completed_real_request(
+    client: TestClient, db_session: Session
+) -> None:
+    db_session.add_all(
+        [
+            IngestionRun(
+                job_type="sync_nav",
+                status="partial",
+                parameters={"provider": "EASTMONEY_NAV"},
+                started_at=datetime(2026, 8, 1, 1, tzinfo=UTC),
+                finished_at=datetime(2026, 8, 1, 2, tzinfo=UTC),
+                records_failed=2,
+            ),
+            IngestionRun(
+                job_type="sync_nav",
+                status="succeeded",
+                parameters={"provider": "EASTMONEY_NAV"},
+                started_at=datetime(2026, 8, 2, 1, tzinfo=UTC),
+                finished_at=datetime(2026, 8, 2, 2, tzinfo=UTC),
+            ),
+            IngestionRun(
+                job_type="sync_reports",
+                status="partial",
+                parameters={"provider": "CSRC_EID"},
+                started_at=datetime(2026, 8, 2, 3, tzinfo=UTC),
+                finished_at=datetime(2026, 8, 2, 4, tzinfo=UTC),
+                records_failed=3,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/provider-health")
+
+    assert response.status_code == 200
+    providers = {item["name"]: item for item in response.json()["providers"]}
+    assert providers["eastmoney_nav"] == {
+        "name": "eastmoney_nav",
+        "enabled": True,
+        "priority": 20,
+        "status": "HEALTHY",
+        "last_checked_at": "2026-08-02T02:00:00",
+        "last_run_status": "succeeded",
+        "records_failed": 0,
+    }
+    assert providers["csrc_reports"]["status"] == "DEGRADED"
+    assert providers["csrc_reports"]["records_failed"] == 3
+    assert providers["ecb_fx"]["status"] == "UNKNOWN"
+    assert providers["ecb_fx"]["last_checked_at"] is None
+
+
 def test_portfolio_uses_latest_nav_without_mixing_fee_deductions(
     client: TestClient, seeded: dict[str, int]
 ) -> None:

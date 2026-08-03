@@ -431,6 +431,9 @@ export interface ProviderHealth {
   enabled: boolean
   priority: number
   status: 'HEALTHY' | 'DEGRADED' | 'RATE_LIMITED' | 'SCHEMA_CHANGED' | 'DISABLED' | 'UNKNOWN'
+  last_checked_at: string | null
+  last_run_status: string | null
+  records_failed: number | null
 }
 
 export interface ComparePayload {

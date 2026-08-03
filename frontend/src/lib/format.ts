@@ -120,16 +120,29 @@ export function reportTypeLabel(value: unknown): string {
 
 export function issueTone(value: unknown): 'good' | 'warn' | 'bad' | 'neutral' {
   const normalized = String(value ?? '').toLowerCase()
-  if (['success', 'succeeded', 'parsed', 'valid_empty', 'completed', 'resolved', 'direct_only', 'closed'].includes(normalized)) {
+  if (['success', 'succeeded', 'healthy', 'parsed', 'valid_empty', 'completed', 'resolved', 'direct_only', 'closed'].includes(normalized)) {
     return 'good'
   }
-  if (['warning', 'low_confidence', 'partial', 'queued', 'running', 'pending', 'unresolved', 'open'].includes(normalized)) {
+  if (['warning', 'low_confidence', 'degraded', 'rate_limited', 'partial', 'queued', 'running', 'pending', 'unresolved', 'open'].includes(normalized)) {
     return 'warn'
   }
-  if (['error', 'failed', 'failed_with_reason', 'circular_relation_detected', 'critical', 'high'].includes(normalized)) {
+  if (['error', 'failed', 'failed_with_reason', 'schema_changed', 'circular_relation_detected', 'critical', 'high'].includes(normalized)) {
     return 'bad'
   }
   return 'neutral'
+}
+
+export function providerHealthLabel(value: unknown): string {
+  const normalized = String(value ?? '').toLowerCase()
+  const labels: Record<string, string> = {
+    healthy: '健康',
+    degraded: '降级',
+    rate_limited: '受到限流',
+    schema_changed: '来源结构变化',
+    disabled: '已停用',
+    unknown: '尚未验证',
+  }
+  return labels[normalized] ?? (value ? String(value) : '尚未验证')
 }
 
 export function lookthroughStatusLabel(value: unknown): string {

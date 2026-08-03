@@ -40,6 +40,7 @@ import {
   formatDate,
   issueTone,
   lookthroughStatusLabel,
+  providerHealthLabel,
   statusLabel,
   toNumber,
 } from '../lib/format'
@@ -291,7 +292,7 @@ export function DataOpsPage() {
 
       <section className="panel" aria-labelledby="provider-health-title">
         <div className="panel-heading">
-          <div><span className="section-kicker">PROVIDER HEALTH</span><h2 id="provider-health-title">数据来源状态</h2><p>未执行真实请求时保持 UNKNOWN，不把配置存在误报为健康。</p></div>
+          <div><span className="section-kicker">PROVIDER HEALTH</span><h2 id="provider-health-title">数据来源状态</h2><p>根据最近一次已完成的真实请求判断；刷新页面不会额外访问第三方，从未请求时显示“尚未验证”。</p></div>
           <ServerCog size={20} />
         </div>
         {providerHealthQuery.isPending && <LoadingPanel label="载入 Provider 状态…" />}
@@ -301,8 +302,15 @@ export function DataOpsPage() {
           <div className="provider-health-list">
             {providerHealthQuery.data.map((provider) => (
               <div className="provider-health-row" key={provider.name}>
-                <div className="provider-health-copy"><strong>{provider.name}</strong><small>优先级 {provider.priority}</small></div>
-                <StatusBadge value={provider.status.toLowerCase()} label={provider.status} />
+                <div className="provider-health-copy">
+                  <strong>{provider.name}</strong>
+                  <small>
+                    优先级 {provider.priority} · {provider.last_checked_at
+                      ? `最近验证 ${formatDate(provider.last_checked_at, true)} · ${statusLabel(provider.last_run_status)}${provider.records_failed ? ` · ${provider.records_failed} 项失败` : ''}`
+                      : '尚无真实请求记录'}
+                  </small>
+                </div>
+                <StatusBadge value={provider.status.toLowerCase()} label={providerHealthLabel(provider.status)} />
               </div>
             ))}
           </div>

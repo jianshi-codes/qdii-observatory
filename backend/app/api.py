@@ -120,6 +120,13 @@ PurchaseLimitChannel = Literal["DIRECT", "DISTRIBUTION"]
 CENT = Decimal("0.01")
 QUANTITY_SCALE = Decimal("0.00000001")
 PERCENT_SCALE = Decimal("0.00000001")
+PROVIDER_RUN_IDENTITIES = {
+    "eastmoney_catalog": ("import_public_funds", "EASTMONEY_FUND_CATALOG"),
+    "csrc_reports": ("sync_reports", "CSRC_EID"),
+    "eastmoney_nav": ("sync_nav", "EASTMONEY_NAV"),
+    "eastmoney_market": ("sync_exchange_prices", "EASTMONEY_MARKET"),
+    "ecb_fx": ("sync_exchange_rates", "ECB_REFERENCE_RATE"),
+}
 
 
 def get_fund_catalog_provider() -> Generator[FundCatalogProvider, None, None]:
@@ -818,20 +825,45 @@ def get_purchase_limit_coverage(db: DbSession) -> PurchaseLimitCoverageRead:
     )
 
 
+def _latest_provider_run(db: Session, provider_name: str) -> IngestionRun | None:
+    identity = PROVIDER_RUN_IDENTITIES.get(provider_name)
+    if identity is None:
+        return None
+    job_type, run_provider = identity
+    return db.scalar(
+        select(IngestionRun)
+        .where(
+            IngestionRun.job_type == job_type,
+            IngestionRun.finished_at.is_not(None),
+            IngestionRun.parameters["provider"].as_string() == run_provider,
+        )
+        .order_by(IngestionRun.finished_at.desc(), IngestionRun.id.desc())
+        .limit(1)
+    )
+
+
 @router.get("/provider-health")
-def get_provider_health() -> dict[str, object]:
+def get_provider_health(db: DbSession) -> dict[str, object]:
     registry = load_provider_registry()
-    return {
-        "providers": [
+    providers: list[dict[str, object]] = []
+    for name, config in registry.items():
+        observation = _latest_provider_run(db, name) if config.enabled else None
+        providers.append(
             {
                 "name": name,
                 "enabled": config.enabled,
                 "priority": config.priority,
-                "status": provider_status(config).value,
+                "status": provider_status(
+                    config,
+                    run_status=observation.status if observation else None,
+                    error_message=observation.error_message if observation else None,
+                ).value,
+                "last_checked_at": observation.finished_at if observation else None,
+                "last_run_status": observation.status if observation else None,
+                "records_failed": observation.records_failed if observation else None,
             }
-            for name, config in registry.items()
-        ]
-    }
+        )
+    return {"providers": providers}
 
 
 @portfolio_router.get("/portfolio", response_model=PortfolioRead)

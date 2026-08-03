@@ -222,7 +222,10 @@ describe('DataOpsPage purchase-limit coverage', () => {
         name: 'eastmoney_catalog',
         enabled: true,
         priority: 5,
-        status: 'UNKNOWN',
+        status: 'HEALTHY',
+        last_checked_at: '2026-08-02T02:00:00Z',
+        last_run_status: 'succeeded',
+        records_failed: 0,
       }] })
       if (path === '/api/operations/preparation-status') return response(preparationStatus())
       if (path === '/api/fund-catalog/options') return response({
@@ -238,8 +241,9 @@ describe('DataOpsPage purchase-limit coverage', () => {
     const { container } = renderPage()
 
     expect(await screen.findByText('eastmoney_catalog')).toBeInTheDocument()
-    expect(screen.getByText('优先级 5')).toBeInTheDocument()
-    expect(screen.getByText('UNKNOWN')).toBeInTheDocument()
+    expect(screen.getByText(/优先级 5/)).toBeInTheDocument()
+    expect(screen.getByText('健康')).toBeInTheDocument()
+    expect(screen.getByText(/最近验证.*成功/)).toBeInTheDocument()
     expect(container.querySelector('.provider-health-row')).toBeInTheDocument()
     expect(container.querySelector('.provider-health-row.run-row')).not.toBeInTheDocument()
   })

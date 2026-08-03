@@ -78,8 +78,30 @@ def _parse_provider(name: str, raw: dict[str, Any]) -> ProviderConfig:
     )
 
 
-def provider_status(config: ProviderConfig) -> ProviderHealth:
-    return ProviderHealth.UNKNOWN if config.enabled else ProviderHealth.DISABLED
+def provider_status(
+    config: ProviderConfig,
+    *,
+    run_status: str | None = None,
+    error_message: str | None = None,
+) -> ProviderHealth:
+    if not config.enabled:
+        return ProviderHealth.DISABLED
+    normalized_status = (run_status or "").strip().lower()
+    if normalized_status == "succeeded":
+        return ProviderHealth.HEALTHY
+    if normalized_status == "partial":
+        return ProviderHealth.DEGRADED
+    if normalized_status == "failed":
+        normalized_error = (error_message or "").lower()
+        if any(token in normalized_error for token in ("429", "rate limit", "too many requests")):
+            return ProviderHealth.RATE_LIMITED
+        if any(
+            token in normalized_error
+            for token in ("schema", "unexpected payload", "missing required field")
+        ):
+            return ProviderHealth.SCHEMA_CHANGED
+        return ProviderHealth.DEGRADED
+    return ProviderHealth.UNKNOWN
 
 
 def provider_client(*names: str) -> ProviderHttpClient:
