@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import type { EChartsOption } from 'echarts'
 import {
-  ArrowDownWideNarrow,
+  ArrowDown,
+  ArrowUp,
   CalendarRange,
   ChevronDown,
   CircleGauge,
@@ -23,7 +24,9 @@ import { StatusBadge } from '../components/StatusBadge'
 import { exportDashboardPng } from '../lib/exportDashboardPng'
 import { formatDate, toNumber } from '../lib/format'
 
-type ReturnSort = 'RETURN_DESC' | 'RETURN_ASC' | 'LAG_DESC' | 'CODE_ASC'
+type ReturnSortKey = 'FUND' | 'POOL' | 'RETURN' | 'BASELINE_DATE' | 'END_DATE' | 'LATEST_NAV_DATE' | 'LAG' | 'STATUS'
+type SortDirection = 'asc' | 'desc'
+type ReturnSort = { key: ReturnSortKey; direction: SortDirection }
 
 const periodLabels: Record<ActiveTechPeriod, string> = {
   DAILY: '每日',
@@ -94,22 +97,60 @@ function returnDistributionOption(items: ActiveTechReturnFund[]): EChartsOption 
   }
 }
 
+function sortValue(item: ActiveTechReturnFund, key: ReturnSortKey): number | string | null {
+  if (key === 'FUND') return item.representative_code
+  if (key === 'POOL') return item.pool_segment
+  if (key === 'RETURN') return toNumber(item.return_pct)
+  if (key === 'BASELINE_DATE') return item.baseline_date
+  if (key === 'END_DATE') return item.end_date
+  if (key === 'LATEST_NAV_DATE') return item.latest_official_nav_date
+  if (key === 'LAG') return item.nav_lag_days
+  return statusLabels[item.status]
+}
+
 function sortItems(items: ActiveTechReturnFund[], sort: ReturnSort): ActiveTechReturnFund[] {
   return [...items].sort((left, right) => {
-    if (sort === 'CODE_ASC') return left.representative_code.localeCompare(right.representative_code)
-    if (sort === 'LAG_DESC') return (right.nav_lag_days ?? -1) - (left.nav_lag_days ?? -1)
-    const leftReturn = toNumber(left.return_pct)
-    const rightReturn = toNumber(right.return_pct)
-    if (leftReturn === null) return 1
-    if (rightReturn === null) return -1
-    return sort === 'RETURN_ASC' ? leftReturn - rightReturn : rightReturn - leftReturn
+    const leftValue = sortValue(left, sort.key)
+    const rightValue = sortValue(right, sort.key)
+    if (leftValue === null && rightValue === null) return left.representative_code.localeCompare(right.representative_code)
+    if (leftValue === null) return 1
+    if (rightValue === null) return -1
+    const difference = typeof leftValue === 'number' && typeof rightValue === 'number'
+      ? leftValue - rightValue
+      : String(leftValue).localeCompare(String(rightValue), 'zh-CN')
+    if (difference === 0) return left.representative_code.localeCompare(right.representative_code)
+    return sort.direction === 'asc' ? difference : -difference
   })
+}
+
+function SortableHeader({
+  columnKey,
+  label,
+  sort,
+  numeric = false,
+  onSort,
+}: {
+  columnKey: ReturnSortKey
+  label: string
+  sort: ReturnSort
+  numeric?: boolean
+  onSort: (key: ReturnSortKey) => void
+}) {
+  const active = sort.key === columnKey
+  return (
+    <th className={numeric ? 'numeric' : undefined} aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button className={active ? 'sort-button is-active' : 'sort-button'} type="button" onClick={() => onSort(columnKey)}>
+        {label}
+        {active && (sort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
+      </button>
+    </th>
+  )
 }
 
 export function ActiveTechReturnsPage() {
   const [pool, setPool] = useState<ActiveTechPool>('CORE')
   const [period, setPeriod] = useState<ActiveTechPeriod>('DAILY')
-  const [sort, setSort] = useState<ReturnSort>('RETURN_DESC')
+  const [sort, setSort] = useState<ReturnSort>({ key: 'RETURN', direction: 'desc' })
   const [exportState, setExportState] = useState<'IDLE' | 'EXPORTING' | 'ERROR'>('IDLE')
   const [exportError, setExportError] = useState<string | null>(null)
   const dashboardRef = useRef<HTMLDivElement>(null)
@@ -122,6 +163,15 @@ export function ActiveTechReturnsPage() {
     () => returnDistributionOption(query.data?.items ?? []),
     [query.data?.items],
   )
+
+  function toggleSort(key: ReturnSortKey) {
+    setSort((current) => ({
+      key,
+      direction: current.key === key
+        ? (current.direction === 'desc' ? 'asc' : 'desc')
+        : (key === 'FUND' || key === 'POOL' || key === 'STATUS' ? 'asc' : 'desc'),
+    }))
+  }
 
   async function exportPng() {
     if (!dashboardRef.current || !query.data) return
@@ -165,7 +215,6 @@ export function ActiveTechReturnsPage() {
       <section className="dashboard-filter-bar" aria-label="收益看板筛选">
         <label><span>基金池</span><span className="select-field"><select value={pool} onChange={(event) => setPool(event.target.value as ActiveTechPool)}><option value="CORE">核心 18 只</option><option value="BROAD">广义 33 只</option></select><ChevronDown size={15} /></span></label>
         <label><span>期间</span><span className="select-field"><select value={period} onChange={(event) => setPeriod(event.target.value as ActiveTechPeriod)}><option value="DAILY">每日</option><option value="MTD">本月 MTD</option><option value="QTD">本季度 QTD</option></select><ChevronDown size={15} /></span></label>
-        <label><span>明细排序</span><span className="select-field"><select value={sort} onChange={(event) => setSort(event.target.value as ReturnSort)}><option value="RETURN_DESC">收益从高到低</option><option value="RETURN_ASC">收益从低到高</option><option value="LAG_DESC">净值滞后优先</option><option value="CODE_ASC">基金代码</option></select><ArrowDownWideNarrow size={15} /></span></label>
         <button className="button button-secondary dashboard-refresh" type="button" onClick={() => query.refetch()} disabled={query.isFetching}><RefreshCw size={15} />刷新</button>
       </section>
 
@@ -204,7 +253,16 @@ export function ActiveTechReturnsPage() {
             </div>
             <div className="data-table-wrap dashboard-table-wrap">
               <table className="data-table dashboard-table">
-                <thead><tr><th>基金</th><th>池内角色</th><th>{periodLabels[period]}收益</th><th>基准净值日</th><th>截止净值日</th><th>最新正式净值日</th><th>滞后</th><th>质量状态</th></tr></thead>
+                <thead><tr>
+                  <SortableHeader columnKey="FUND" label="基金" sort={sort} onSort={toggleSort} />
+                  <SortableHeader columnKey="POOL" label="池内角色" sort={sort} onSort={toggleSort} />
+                  <SortableHeader columnKey="RETURN" label={`${periodLabels[period]}收益`} sort={sort} numeric onSort={toggleSort} />
+                  <SortableHeader columnKey="BASELINE_DATE" label="基准净值日" sort={sort} onSort={toggleSort} />
+                  <SortableHeader columnKey="END_DATE" label="截止净值日" sort={sort} onSort={toggleSort} />
+                  <SortableHeader columnKey="LATEST_NAV_DATE" label="最新正式净值日" sort={sort} onSort={toggleSort} />
+                  <SortableHeader columnKey="LAG" label="滞后" sort={sort} numeric onSort={toggleSort} />
+                  <SortableHeader columnKey="STATUS" label="质量状态" sort={sort} onSort={toggleSort} />
+                </tr></thead>
                 <tbody>
                   {sorted.map((item) => (
                     <tr key={item.representative_code}>
