@@ -120,6 +120,98 @@ export interface PublicFundImportResult {
   failures: Record<string, string>
 }
 
+export type ActiveTechPool = 'CORE' | 'BROAD'
+export type ActiveTechPeriod = 'DAILY' | 'MTD' | 'QTD'
+export type ActiveTechReturnStatus = 'READY' | 'STALE' | 'MISSING_NAV' | 'MISSING_BASELINE'
+
+export interface ActiveTechReturnFund {
+  fund_id: Identifier
+  representative_code: string
+  fund_name: string
+  original_category: string | null
+  pool_segment: 'CORE' | 'DYNAMIC'
+  share_code: string | null
+  return_pct: number | string | null
+  baseline_date: string | null
+  end_date: string | null
+  latest_official_nav_date: string | null
+  nav_lag_days: number | null
+  uses_accumulated_nav: boolean
+  status: ActiveTechReturnStatus
+}
+
+export interface ActiveTechReturnsPayload {
+  pool: ActiveTechPool
+  period: ActiveTechPeriod
+  as_of: string
+  sync_date: string | null
+  latest_official_nav_date: string | null
+  common_comparable_date: string | null
+  configured_fund_count: number
+  fund_count: number
+  comparable_fund_count: number
+  missing_fund_count: number
+  stale_fund_count: number
+  positive_fund_count: number
+  negative_fund_count: number
+  average_return_pct: number | string | null
+  median_return_pct: number | string | null
+  items: ActiveTechReturnFund[]
+}
+
+export interface DashboardQuarter {
+  year: number
+  quarter: number
+  period_end: string
+}
+
+export interface ActiveTechRegionItem {
+  country: string
+  nav_pct: number | string
+}
+
+export interface ActiveTechRegionFund {
+  fund_id: Identifier
+  representative_code: string
+  fund_name: string
+  pool_segment: 'CORE' | 'DYNAMIC'
+  report_id: Identifier
+  report_period_end: string
+  parse_confidence: number | string | null
+  disclosed_country_pct: number | string
+  allocations: ActiveTechRegionItem[]
+}
+
+export interface ActiveTechRegionAverage {
+  country: string
+  average_nav_pct: number | string
+  covered_fund_count: number
+}
+
+export interface ActiveTechRegionMissing {
+  fund_id: Identifier
+  representative_code: string
+  fund_name: string
+  reason: 'MISSING_REPORT' | 'REPORT_NOT_PARSED' | 'MISSING_EXPOSURE'
+}
+
+export interface ActiveTechRegionsPayload {
+  pool: ActiveTechPool
+  basis: 'DIRECT' | 'LOOKTHROUGH'
+  report_year: number | null
+  report_quarter: number | null
+  period_end: string | null
+  sync_date: string | null
+  configured_fund_count: number
+  fund_count: number
+  covered_fund_count: number
+  missing_fund_count: number
+  available_quarters: DashboardQuarter[]
+  average_distribution: ActiveTechRegionAverage[]
+  funds: ActiveTechRegionFund[]
+  missing: ActiveTechRegionMissing[]
+}
+
 export interface FundDetail extends FundSummary {
   exposure_family?: string | null
   lookthrough_coverage_pct?: number | string | null

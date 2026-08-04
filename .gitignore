@@ -21,6 +21,7 @@ frontend/dist/
 tmp/
 backups/
 outputs/
+output/
 ~$*.xlsx
 *.xlsx
 !frontend/public/templates/*.xlsx

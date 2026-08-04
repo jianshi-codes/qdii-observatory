@@ -19,6 +19,7 @@ from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from backend.app.active_tech_dashboard import active_tech_regions, active_tech_returns
 from backend.app.config import get_settings
 from backend.app.coverage import lookthrough_status, report_row_counts
 from backend.app.data_operations import (
@@ -99,6 +100,8 @@ from backend.app.q2_analysis.scope import (
     validate_analysis_dates,
 )
 from backend.app.schemas import (
+    ActiveTechRegionsRead,
+    ActiveTechReturnsRead,
     AllocationItemRead,
     CompareFundExposureRead,
     CompareNavSeriesRead,
@@ -191,6 +194,43 @@ def get_fund_catalog_provider() -> Generator[FundCatalogProvider, None, None]:
 
 
 CatalogProvider = Annotated[FundCatalogProvider, Depends(get_fund_catalog_provider)]
+
+
+@router.get(
+    "/dashboards/active-tech/returns",
+    response_model=ActiveTechReturnsRead,
+)
+def get_active_tech_returns(
+    db: DbSession,
+    pool: Literal["CORE", "BROAD"] = "CORE",
+    period: Literal["DAILY", "MTD", "QTD"] = "DAILY",
+    as_of: date | None = None,
+) -> ActiveTechReturnsRead:
+    dashboard_date = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    return active_tech_returns(db, pool=pool, period=period, as_of=dashboard_date)
+
+
+@router.get(
+    "/dashboards/active-tech/regions",
+    response_model=ActiveTechRegionsRead,
+)
+def get_active_tech_regions(
+    db: DbSession,
+    pool: Literal["CORE", "BROAD"] = "CORE",
+    basis: Literal["DIRECT", "LOOKTHROUGH"] = "DIRECT",
+    year: Annotated[int | None, Query(ge=2000, le=2100)] = None,
+    quarter: Annotated[int | None, Query(ge=1, le=4)] = None,
+) -> ActiveTechRegionsRead:
+    try:
+        return active_tech_regions(
+            db,
+            pool=pool,
+            basis=basis,
+            year=year,
+            quarter=quarter,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 def _normalize_basis(value: str) -> ExposureBasis:

@@ -8,7 +8,7 @@ The current source dependency review found:
 
 - frontend packages primarily under MIT, Apache-2.0, ISC, 0BSD, or BSD-3-Clause
   terms, with `minimatch` under BlueOak-1.0.0 and `caniuse-lite` data under
-  CC-BY-4.0;
+  CC-BY-4.0; the browser-local Dashboard PNG renderer `html-to-image` is MIT;
 - Python packages primarily under permissive terms, with `certifi` and `pathspec` under MPL-2.0 and `psycopg`/`psycopg-binary` under LGPL-3.0-only;
 - `pypdfium2` carrying BSD-3-Clause, Apache-2.0, and bundled dependency notices.
 

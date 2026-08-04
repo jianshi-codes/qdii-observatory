@@ -1,4 +1,8 @@
 import type {
+  ActiveTechPeriod,
+  ActiveTechPool,
+  ActiveTechRegionsPayload,
+  ActiveTechReturnsPayload,
   ComparePayload,
   DataQualityIssue,
   DataOperationName,
@@ -151,6 +155,35 @@ async function requestExposure(
 }
 
 export const api = {
+  activeTechReturns: (
+    filters: { pool: ActiveTechPool; period: ActiveTechPeriod },
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams(filters)
+    return request<ActiveTechReturnsPayload>(
+      `/api/dashboards/active-tech/returns?${query.toString()}`,
+      signal,
+    )
+  },
+  activeTechRegions: (
+    filters: {
+      pool: ActiveTechPool
+      basis: 'DIRECT' | 'LOOKTHROUGH'
+      year?: number
+      quarter?: number
+    },
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams({ pool: filters.pool, basis: filters.basis })
+    if (filters.year && filters.quarter) {
+      query.set('year', String(filters.year))
+      query.set('quarter', String(filters.quarter))
+    }
+    return request<ActiveTechRegionsPayload>(
+      `/api/dashboards/active-tech/regions?${query.toString()}`,
+      signal,
+    )
+  },
   portfolioCapability: (signal?: AbortSignal) =>
     request<PortfolioCapability>('/api/portfolio/capability', signal),
   portfolio: (signal?: AbortSignal) => request<PortfolioPayload>('/api/portfolio', signal),

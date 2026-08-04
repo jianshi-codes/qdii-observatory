@@ -5,6 +5,8 @@ import { LoadingPanel } from './components/StatePanel'
 import { FundOverviewPage } from './pages/FundOverviewPage'
 
 const ComparePage = lazy(() => import('./pages/ComparePage').then((module) => ({ default: module.ComparePage })))
+const ActiveTechRegionsPage = lazy(() => import('./pages/ActiveTechRegionsPage').then((module) => ({ default: module.ActiveTechRegionsPage })))
+const ActiveTechReturnsPage = lazy(() => import('./pages/ActiveTechReturnsPage').then((module) => ({ default: module.ActiveTechReturnsPage })))
 const DataOpsPage = lazy(() => import('./pages/DataOpsPage').then((module) => ({ default: module.DataOpsPage })))
 const FundDetailPage = lazy(() => import('./pages/FundDetailPage').then((module) => ({ default: module.FundDetailPage })))
 const PortfolioPage = lazy(() => import('./pages/PortfolioPage').then((module) => ({ default: module.PortfolioPage })))
@@ -17,6 +19,8 @@ export function App() {
           <Route path="/" element={<FundOverviewPage />} />
           <Route path="/funds/:fundId" element={<FundDetailPage />} />
           <Route path="/compare" element={<ComparePage />} />
+          <Route path="/dashboards/active-tech/returns" element={<ActiveTechReturnsPage />} />
+          <Route path="/dashboards/active-tech/regions" element={<ActiveTechRegionsPage />} />
           <Route path="/portfolio" element={<PortfolioPage />} />
           <Route path="/ops" element={<DataOpsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

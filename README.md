@@ -11,6 +11,7 @@
 - 按基金公司、来源分类、研究领域或六位代码，从公开信息添加自选基金。
 - 归档原始报告与来源链接，解析国家、行业、股票和基金持仓，并保留质量问题。
 - 分开保存官方净值、场内价格、申购限额和汇率，支持基金详情与多基金对比。
+- 为主动科技 QDII 的核心 18 只和广义 33 只基金池即时计算每日、MTD、QTD 收益，并按季度查看直接/穿透地区分布；两个看板都可导出固定尺寸 PNG。
 - 默认提供本地持仓、定投确认和披露持仓一致性分析；不连接账户、不自动交易。
 - 持仓一致性结果可生成身份脱敏的完整财务 JSON，预览后复制给 ChatGPT 做辅助研究。
 
@@ -80,6 +81,7 @@ make check
 - 上手与运维：[用户指南](docs/user-guide.md) · [快速开始](docs/quickstart.md) · [每日维护与重启](docs/daily-operations.md) · [故障排查](docs/troubleshooting.md)
 - 部署与设计：[配置](docs/configuration.md) · [外部 PostgreSQL](docs/external-postgresql.md) · [架构](docs/architecture.md) · [数据模型](docs/data-model.md)
 - 研究方法：[报告解析](docs/report-parsing.md) · [穿透](docs/lookthrough.md) · [披露持仓一致性](docs/disclosed-holdings-analysis.md)
+- 专题看板：[主动科技 QDII 看板](docs/active-tech-dashboards.md)
 - 项目治理：[贡献指南](CONTRIBUTING.md) · [隐私](PRIVACY.md) · [安全](SECURITY.md) · [变更记录](CHANGELOG.md) · [路线图](ROADMAP.md)
 
 ## License
