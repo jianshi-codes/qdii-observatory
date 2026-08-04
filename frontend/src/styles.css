@@ -1913,6 +1913,90 @@ a.portfolio-fx-source:hover {
   font-size: 11px;
 }
 
+.q2-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.portfolio-ai-dialog {
+  width: min(920px, 100%);
+}
+
+.portfolio-ai-privacy {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  color: #704710;
+  background: #fff4d6;
+  border: 1px solid rgb(183 119 26 / 22%);
+  border-radius: 9px;
+}
+
+.portfolio-ai-privacy svg {
+  flex: 0 0 auto;
+}
+
+.portfolio-ai-privacy div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.portfolio-ai-privacy strong {
+  font-size: 10px;
+}
+
+.portfolio-ai-privacy span {
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.portfolio-ai-json-label {
+  display: block;
+  margin-top: 16px;
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.portfolio-ai-json {
+  width: 100%;
+  height: min(48vh, 460px);
+  margin-top: 6px;
+  padding: 14px;
+  resize: vertical;
+  color: #d9e4ed;
+  background: #172536;
+  border: 1px solid #263a50;
+  border-radius: 10px;
+  font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.portfolio-ai-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.copy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  color: var(--jade-dark);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.copy-status.is-error {
+  color: var(--coral-dark);
+}
+
 .portfolio-dialog-backdrop {
   position: fixed;
   z-index: 1000;
@@ -3582,6 +3666,17 @@ a.portfolio-fx-source:hover {
   .portfolio-q2-panel .q2-panel-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .q2-panel-actions,
+  .portfolio-ai-dialog-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .copy-status {
+    min-height: 18px;
+    margin-right: 0;
   }
 
   .q2-portfolio-metrics,

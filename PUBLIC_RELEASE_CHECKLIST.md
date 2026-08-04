@@ -8,7 +8,7 @@
 - [x] Apache-2.0、NOTICE、免责声明、隐私、数据许可和安全政策已提供。
 - [x] README、架构、配置、数据模型、解析、穿透、分析与运维文档已提供。
 - [x] CI 仅依赖 fixture，不访问真实 Provider。
-- [x] 当前工作树已完成 backend/frontend 镜像构建、170 个后端测试、29 个前端测试，并从空 PostgreSQL 升级到 `0011_operation_lookback` 后通过受管库预检。
+- [x] 当前工作树已完成 backend/frontend 镜像构建、172 个后端测试、30 个前端测试，并从空 PostgreSQL 升级到 `0011_operation_lookback` 后通过受管库预检。
 - [x] 当前 Python/前端依赖已生成许可证清单并检查许可证类别；LGPL/MPL 与 bundled dependency 义务已在 `THIRD_PARTY_NOTICES.md` 标出。
 - [x] 已按当前 lockfile/开发环境复核源代码依赖许可证；前端的 BlueOak-1.0.0 与 CC-BY-4.0、Python 的 LGPL/MPL 义务已在 `THIRD_PARTY_NOTICES.md` 标出。
 - [x] 已人工检查 Provider fixture：只保留 synthetic 或最小化结构样本，不包含完整第三方页面、PDF、账户数据或 Provider 响应归档。

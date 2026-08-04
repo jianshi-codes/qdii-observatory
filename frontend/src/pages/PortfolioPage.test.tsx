@@ -27,6 +27,11 @@ describe('PortfolioPage', () => {
   it('shows currency-separated valuation, dividends, recurring investment, and fees', async () => {
     let portfolioRequests = 0
     let refreshSubmitted = false
+    const writeClipboard = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: writeClipboard },
+    })
     const today = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(new Date())
@@ -349,6 +354,20 @@ describe('PortfolioPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '运行持仓一致性分析' }))
     expect(await screen.findByText('2026 Q2')).toBeInTheDocument()
     expect(screen.getByText('偏差 +2.70 个百分点')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 AI 分析' }))
+    expect(screen.getByRole('dialog', { name: '导出 AI 持仓分析' })).toBeInTheDocument()
+    expect(screen.getByText('包含个人财务数据')).toBeInTheDocument()
+    const exportedJson = (screen.getByLabelText('AI 持仓分析 JSON') as HTMLTextAreaElement).value
+    expect(exportedJson).toContain('"estimated_market_value": "21000.00"')
+    expect(exportedJson).toContain('日期待补')
+    expect(exportedJson).not.toContain('测试平台')
+    expect(exportedJson).not.toContain('"fund_id"')
+    fireEvent.click(screen.getByRole('button', { name: '复制 ChatGPT 提示词' }))
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith(expect.stringContaining('完整持仓 JSON')))
+    expect(await screen.findByText('ChatGPT 提示词已复制')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '关闭 AI 分析导出' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '导出 AI 持仓分析' })).not.toBeInTheDocument())
 
     fireEvent.click(screen.getAllByRole('button', { name: '修正' })[0])
     expect(screen.getByRole('dialog', { name: '修正持仓快照' })).toBeInTheDocument()

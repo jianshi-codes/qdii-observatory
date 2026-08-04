@@ -2,8 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowUp,
+  Bot,
   CalendarClock,
+  Check,
   CircleDollarSign,
+  Copy,
   Download,
   FileCheck2,
   Landmark,
@@ -12,6 +15,7 @@ import {
   Plus,
   ReceiptText,
   RefreshCw,
+  ShieldCheck,
   Upload,
   WalletCards,
   X,
@@ -24,12 +28,18 @@ import type {
   PortfolioConsistencyPayload,
   PortfolioEditableInput,
   PortfolioImportPositionPreview,
+  PortfolioPayload,
   PortfolioPosition,
   PortfolioPositionCreateInput,
 } from '../api/types'
 import { EmptyPanel, ErrorPanel, LoadingPanel } from '../components/StatePanel'
 import { StatusBadge } from '../components/StatusBadge'
 import { formatDate, formatPercent, statusLabel, toNumber } from '../lib/format'
+import {
+  buildPortfolioAiContext,
+  portfolioAiJson,
+  portfolioChatGptPrompt,
+} from '../lib/portfolioAiExport'
 
 function currencySymbol(currency: string): string {
   return currency === 'CNY' ? '¥' : currency === 'USD' ? '$' : `${currency} `
@@ -723,6 +733,7 @@ export function PortfolioPage() {
           </section>
 
           <PortfolioConsistencyPanel
+            portfolio={portfolioQuery.data}
             analysis={consistencyQuery.data}
             requested={consistencyRequested}
             pending={consistencyQuery.isPending && consistencyRequested}
@@ -887,19 +898,100 @@ function reportPeriodLabel(analysis: PortfolioConsistencyPayload | undefined): s
   return `${parsed.getFullYear()} Q${Math.floor(parsed.getMonth() / 3) + 1}`
 }
 
+function PortfolioAiExportDialog({
+  portfolio,
+  analysis,
+  onClose,
+}: {
+  portfolio: PortfolioPayload
+  analysis: PortfolioConsistencyPayload
+  onClose: () => void
+}) {
+  const [context] = useState(() => buildPortfolioAiContext(portfolio, analysis))
+  const [copyState, setCopyState] = useState<'idle' | 'json' | 'prompt' | 'error'>('idle')
+  const json = portfolioAiJson(context)
+
+  async function copy(value: string, kind: 'json' | 'prompt') {
+    try {
+      if (!navigator.clipboard) throw new Error('clipboard unavailable')
+      await navigator.clipboard.writeText(value)
+      setCopyState(kind)
+    } catch {
+      setCopyState('error')
+    }
+  }
+
+  return (
+    <div className="portfolio-dialog-backdrop" role="presentation">
+      <div
+        className="portfolio-dialog portfolio-ai-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="portfolio-ai-dialog-title"
+      >
+        <div className="portfolio-dialog-heading">
+          <div>
+            <span className="section-kicker">AI RESEARCH EXPORT</span>
+            <h2 id="portfolio-ai-dialog-title">导出 AI 持仓分析</h2>
+            <p>生成完整个人财务上下文，同时删除平台名与本地数据库 ID。应用不会自动连接或上传到任何 AI 服务。</p>
+          </div>
+          <button className="icon-button" type="button" aria-label="关闭 AI 分析导出" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="portfolio-ai-privacy" role="note">
+          <ShieldCheck size={18} />
+          <div>
+            <strong>包含个人财务数据</strong>
+            <span>JSON 保留总资产、份额、收益、定投金额、现金流和备注。复制并粘贴到 ChatGPT 后，这些数据将离开本地应用。</span>
+          </div>
+        </div>
+
+        <label className="portfolio-ai-json-label" htmlFor="portfolio-ai-json">JSON 预览</label>
+        <textarea
+          id="portfolio-ai-json"
+          className="portfolio-ai-json"
+          aria-label="AI 持仓分析 JSON"
+          readOnly
+          spellCheck={false}
+          value={json}
+        />
+
+        <div className="portfolio-ai-dialog-actions">
+          <span className={copyState === 'error' ? 'copy-status is-error' : 'copy-status'} role="status">
+            {copyState === 'json' && <><Check size={13} />JSON 已复制</>}
+            {copyState === 'prompt' && <><Check size={13} />ChatGPT 提示词已复制</>}
+            {copyState === 'error' && '复制失败，请在 JSON 预览中手动全选复制。'}
+          </span>
+          <button className="button button-secondary" type="button" onClick={() => { void copy(json, 'json') }}>
+            <Copy size={14} />复制 JSON
+          </button>
+          <button className="button button-primary" type="button" onClick={() => { void copy(portfolioChatGptPrompt(context), 'prompt') }}>
+            <Bot size={14} />复制 ChatGPT 提示词
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function PortfolioConsistencyPanel({
+  portfolio,
   analysis,
   requested,
   pending,
   error,
   onRun,
 }: {
+  portfolio: PortfolioPayload
   analysis: PortfolioConsistencyPayload | undefined
   requested: boolean
   pending: boolean
   error: unknown
   onRun: () => void
 }) {
+  const [aiExportOpen, setAiExportOpen] = useState(false)
   const prediction = analysis?.portfolio_prediction
   const periodLabel = reportPeriodLabel(analysis)
 
@@ -911,10 +1003,17 @@ function PortfolioConsistencyPanel({
           <h2 id="portfolio-consistency-title">持仓一致性</h2>
           <p>按需汇总当前持仓中的主动基金；季度静态披露用于解释偏差，不代表当前真实组合。</p>
         </div>
-        <button className="button button-primary" type="button" onClick={onRun} disabled={pending}>
-          <RefreshCw size={15} className={pending ? 'spin' : ''} />
-          {pending ? '正在分析…' : analysis ? '重新运行分析' : '运行持仓一致性分析'}
-        </button>
+        <div className="q2-panel-actions">
+          {analysis && (
+            <button className="button button-secondary" type="button" onClick={() => setAiExportOpen(true)}>
+              <Bot size={15} />导出 AI 分析
+            </button>
+          )}
+          <button className="button button-primary" type="button" onClick={onRun} disabled={pending}>
+            <RefreshCw size={15} className={pending ? 'spin' : ''} />
+            {pending ? '正在分析…' : analysis ? '重新运行分析' : '运行持仓一致性分析'}
+          </button>
+        </div>
       </div>
 
       {!requested && !analysis && (
@@ -1059,6 +1158,13 @@ function PortfolioConsistencyPanel({
             {analysis.limitations.map((item) => <li key={item}>{item}</li>)}
           </ul>
         </>
+      )}
+      {analysis && aiExportOpen && (
+        <PortfolioAiExportDialog
+          portfolio={portfolio}
+          analysis={analysis}
+          onClose={() => setAiExportOpen(false)}
+        />
       )}
     </section>
   )
