@@ -11,3 +11,5 @@ Provider registry 支持启用/禁用、优先级、timeout、retry、rate limit
 每个归档对象应保存来源 URL、抓取时间、MIME、SHA-256、解析器版本和质量问题；来源变更应标记 `SCHEMA_CHANGED`，不能静默填 0。
 
 `qdii doctor` 会检查配置、数据库、migration、数据目录、DNS 可达性、universe、最新报告、最新净值、缓存权限和 Portfolio 开关。DNS 可达不等于来源健康；真实 ingestion 结果与 schema 校验才是证据。
+
+主动科技 QDII 收益看板只派生自本地已保存的正式基金净值；季度地区看板只派生自本地已归档、解析的季度报告和穿透结果。看板没有新增 Provider，也不把场内价格、估算净值或缺失值替代为正式净值/披露数据。

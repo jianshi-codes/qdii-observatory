@@ -369,6 +369,98 @@ class PublicFundImportRead(ApiModel):
     failures: dict[str, str]
 
 
+DashboardPool = Literal["CORE", "BROAD"]
+DashboardPoolSegment = Literal["CORE", "DYNAMIC"]
+
+
+class ActiveTechReturnFundRead(ApiModel):
+    fund_id: int
+    representative_code: str
+    fund_name: str
+    original_category: str | None
+    pool_segment: DashboardPoolSegment
+    share_code: str | None
+    return_pct: Decimal | None
+    baseline_date: date | None
+    end_date: date | None
+    latest_official_nav_date: date | None
+    nav_lag_days: int | None
+    uses_accumulated_nav: bool
+    status: Literal["READY", "STALE", "MISSING_NAV", "MISSING_BASELINE"]
+
+
+class ActiveTechReturnsRead(ApiModel):
+    pool: DashboardPool
+    period: Literal["DAILY", "MTD", "QTD"]
+    as_of: date
+    sync_date: date | None
+    latest_official_nav_date: date | None
+    common_comparable_date: date | None
+    configured_fund_count: int
+    fund_count: int
+    comparable_fund_count: int
+    missing_fund_count: int
+    stale_fund_count: int
+    positive_fund_count: int
+    negative_fund_count: int
+    average_return_pct: Decimal | None
+    median_return_pct: Decimal | None
+    items: list[ActiveTechReturnFundRead]
+
+
+class DashboardQuarterRead(ApiModel):
+    year: int
+    quarter: int
+    period_end: date
+
+
+class ActiveTechRegionItemRead(ApiModel):
+    country: str
+    nav_pct: Decimal
+
+
+class ActiveTechRegionFundRead(ApiModel):
+    fund_id: int
+    representative_code: str
+    fund_name: str
+    pool_segment: DashboardPoolSegment
+    report_id: int
+    report_period_end: date
+    parse_confidence: Decimal | None
+    disclosed_country_pct: Decimal
+    allocations: list[ActiveTechRegionItemRead]
+
+
+class ActiveTechRegionAverageRead(ApiModel):
+    country: str
+    average_nav_pct: Decimal
+    covered_fund_count: int
+
+
+class ActiveTechRegionMissingRead(ApiModel):
+    fund_id: int
+    representative_code: str
+    fund_name: str
+    reason: Literal["MISSING_REPORT", "REPORT_NOT_PARSED", "MISSING_EXPOSURE"]
+
+
+class ActiveTechRegionsRead(ApiModel):
+    pool: DashboardPool
+    basis: Literal["DIRECT", "LOOKTHROUGH"]
+    report_year: int | None
+    report_quarter: int | None
+    period_end: date | None
+    sync_date: date | None
+    configured_fund_count: int
+    fund_count: int
+    covered_fund_count: int
+    missing_fund_count: int
+    available_quarters: list[DashboardQuarterRead]
+    average_distribution: list[ActiveTechRegionAverageRead]
+    funds: list[ActiveTechRegionFundRead]
+    missing: list[ActiveTechRegionMissingRead]
+
+
 class ExposureFamilyRead(ApiModel):
     code: str
     display_name: str

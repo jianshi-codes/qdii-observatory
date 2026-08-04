@@ -6,6 +6,8 @@ All notable changes will be documented here. This project follows Keep a Changel
 
 ### Added
 
+- 主动科技 QDII 核心 18 只/广义 33 只收益看板：请求时计算每日、MTD、QTD 正式净值收益，展示共同可比日期和数据质量状态。
+- 主动科技 QDII 季度地区看板：支持 DIRECT/LOOKTHROUGH、季度历史、缺失覆盖和固定尺寸整页 PNG 导出。
 - 从公开目录按基金公司、来源分类、研究领域或精确代码选择基金，并支持 XLSX universe 模板。
 - 数据准备任务队列、单基金/全量季度补齐、每日 5/10 日历日同步、Provider health 与中文质量问题归组。
 - 可选本地 Portfolio：XLSX 预览确认导入、手工维护、份额主导估值和幂等定投待确认/确认台账。

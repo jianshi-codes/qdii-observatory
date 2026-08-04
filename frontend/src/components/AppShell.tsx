@@ -3,6 +3,7 @@ import {
   BarChart3,
   DatabaseZap,
   Menu,
+  MapPinned,
   Orbit,
   Scale,
   WalletCards,
@@ -13,6 +14,8 @@ import { NavLink } from 'react-router'
 
 const navigation = [
   { to: '/', label: '基金总览', icon: BarChart3, end: true },
+  { to: '/dashboards/active-tech/returns', label: '收益看板', icon: Activity },
+  { to: '/dashboards/active-tech/regions', label: '地区看板', icon: MapPinned },
   { to: '/portfolio', label: '我的持仓', icon: WalletCards },
   { to: '/compare', label: '基金对比', icon: Scale },
   { to: '/ops', label: '数据运维', icon: DatabaseZap },

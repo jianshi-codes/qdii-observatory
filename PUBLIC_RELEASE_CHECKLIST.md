@@ -8,10 +8,11 @@
 - [x] Apache-2.0、NOTICE、免责声明、隐私、数据许可和安全政策已提供。
 - [x] README、架构、配置、数据模型、解析、穿透、分析与运维文档已提供。
 - [x] CI 仅依赖 fixture，不访问真实 Provider。
-- [x] 当前工作树已完成 backend/frontend 镜像构建、172 个后端测试、30 个前端测试，并从空 PostgreSQL 升级到 `0011_operation_lookback` 后通过受管库预检。
+- [x] 当前工作树已完成 backend/frontend 镜像构建、182 个后端测试、32 个前端测试，并在 `0011_operation_lookback` 受管外部库通过预检。
 - [x] 当前 Python/前端依赖已生成许可证清单并检查许可证类别；LGPL/MPL 与 bundled dependency 义务已在 `THIRD_PARTY_NOTICES.md` 标出。
 - [x] 已按当前 lockfile/开发环境复核源代码依赖许可证；前端的 BlueOak-1.0.0 与 CC-BY-4.0、Python 的 LGPL/MPL 义务已在 `THIRD_PARTY_NOTICES.md` 标出。
 - [x] 已人工检查 Provider fixture：只保留 synthetic 或最小化结构样本，不包含完整第三方页面、PDF、账户数据或 Provider 响应归档。
+- [x] 主动科技 Dashboard 没有新增 Provider；只派生现有正式净值、季报和穿透数据。PNG 浏览器依赖 `html-to-image` 为 MIT，真实数据与导出图片不进入 tracked tree。
 - [x] 当前 tracked file 已完成 secret、用户路径和个人数据扫描。
 - [x] 当前完整 Git 历史已通过 gitleaks；精确 allowlist 只排除 `disclosed_top10_pct` UI 标识产生的两处误报。
 - [x] 维护者已明确选择保留现有 Git 历史，并接受作者姓名/邮箱等贡献者身份元数据随 Public 仓库公开；不重写历史，不声称匿名。

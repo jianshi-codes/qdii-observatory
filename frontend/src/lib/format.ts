@@ -135,10 +135,10 @@ export function reportTypeLabel(value: unknown): string {
 
 export function issueTone(value: unknown): 'good' | 'warn' | 'bad' | 'neutral' {
   const normalized = String(value ?? '').toLowerCase()
-  if (['success', 'succeeded', 'healthy', 'parsed', 'valid_empty', 'completed', 'resolved', 'direct_only', 'closed', 'consistent'].includes(normalized)) {
+  if (['success', 'succeeded', 'healthy', 'parsed', 'valid_empty', 'completed', 'resolved', 'direct_only', 'closed', 'consistent', 'ready'].includes(normalized)) {
     return 'good'
   }
-  if (['warning', 'low_confidence', 'degraded', 'rate_limited', 'partial', 'queued', 'running', 'pending', 'unresolved', 'open', 'slightly_diverging', 'insufficient_data'].includes(normalized)) {
+  if (['warning', 'low_confidence', 'degraded', 'rate_limited', 'partial', 'queued', 'running', 'pending', 'unresolved', 'open', 'slightly_diverging', 'insufficient_data', 'stale', 'missing_nav', 'missing_baseline', 'missing_report', 'report_not_parsed', 'missing_exposure'].includes(normalized)) {
     return 'warn'
   }
   if (['error', 'failed', 'failed_with_reason', 'schema_changed', 'circular_relation_detected', 'critical', 'high', 'likely_exposure_changed'].includes(normalized)) {
