@@ -7,7 +7,9 @@ import { ActiveTechRegionsPage } from './ActiveTechRegionsPage'
 import { ActiveTechReturnsPage } from './ActiveTechReturnsPage'
 
 vi.mock('../components/EChart', () => ({
-  EChart: ({ ariaLabel }: { ariaLabel: string }) => <div role="img" aria-label={ariaLabel} />,
+  EChart: ({ ariaLabel, option }: { ariaLabel: string; option: unknown }) => (
+    <div role="img" aria-label={ariaLabel} data-option={JSON.stringify(option)} />
+  ),
 }))
 vi.mock('../lib/exportDashboardPng', () => ({
   exportDashboardPng: vi.fn(() => Promise.resolve()),
@@ -83,31 +85,62 @@ const regionsPayload = {
   period_end: '2026-06-30',
   sync_date: '2026-08-04',
   configured_fund_count: 18,
-  fund_count: 2,
-  covered_fund_count: 1,
+  fund_count: 3,
+  covered_fund_count: 2,
   missing_fund_count: 1,
   available_quarters: [
     { year: 2026, quarter: 2, period_end: '2026-06-30' },
     { year: 2026, quarter: 1, period_end: '2026-03-31' },
   ],
   average_distribution: [
-    { country: '美国', average_nav_pct: '70', covered_fund_count: 1 },
-    { country: '中国香港', average_nav_pct: '20', covered_fund_count: 1 },
+    { country: '美国', average_nav_pct: '75', covered_fund_count: 2 },
+    { country: '日本', average_nav_pct: '5.5', covered_fund_count: 2 },
+    { country: '韩国', average_nav_pct: '3', covered_fund_count: 2 },
+    { country: '中国香港', average_nav_pct: '9', covered_fund_count: 2 },
+    { country: '中国内地', average_nav_pct: '3', covered_fund_count: 2 },
+    { country: '其他分类', average_nav_pct: '2.5', covered_fund_count: 2 },
+    { country: '未披露', average_nav_pct: '2', covered_fund_count: 2 },
   ],
-  funds: [{
-    fund_id: 1,
-    representative_code: '002891',
-    fund_name: '华夏移动互联混合',
-    pool_segment: 'CORE',
-    report_id: 1,
-    report_period_end: '2026-06-30',
-    parse_confidence: '0.95',
-    disclosed_country_pct: '90',
-    allocations: [
-      { country: '美国', nav_pct: '70' },
-      { country: '中国香港', nav_pct: '20' },
-    ],
-  }],
+  funds: [
+    {
+      fund_id: 1,
+      representative_code: '002891',
+      fund_name: '华夏移动互联混合',
+      pool_segment: 'CORE',
+      report_id: 1,
+      report_period_end: '2026-06-30',
+      parse_confidence: '0.95',
+      disclosed_country_pct: '97',
+      allocations: [
+        { country: '美国', nav_pct: '70' },
+        { country: '日本', nav_pct: '5' },
+        { country: '韩国', nav_pct: '5' },
+        { country: '中国香港', nav_pct: '10' },
+        { country: '中国内地', nav_pct: '4' },
+        { country: '其他分类', nav_pct: '3' },
+        { country: '未披露', nav_pct: '3' },
+      ],
+    },
+    {
+      fund_id: 3,
+      representative_code: '005698',
+      fund_name: '华夏全球科技先锋混合',
+      pool_segment: 'CORE',
+      report_id: 2,
+      report_period_end: '2026-06-30',
+      parse_confidence: '0.96',
+      disclosed_country_pct: '99',
+      allocations: [
+        { country: '美国', nav_pct: '80' },
+        { country: '日本', nav_pct: '6' },
+        { country: '韩国', nav_pct: '1' },
+        { country: '中国香港', nav_pct: '8' },
+        { country: '中国内地', nav_pct: '2' },
+        { country: '其他分类', nav_pct: '2' },
+        { country: '未披露', nav_pct: '1' },
+      ],
+    },
+  ],
   missing: [{
     fund_id: 2,
     representative_code: '005698',
@@ -157,8 +190,23 @@ describe('active technology dashboards', () => {
 
     expect(await screen.findByText('主动科技 QDII 地区看板')).toBeInTheDocument()
     expect(await screen.findByText('缺少季度报告')).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: '基金地区构成堆叠图' })).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: '基金池平均地区分布条形图' })).toBeInTheDocument()
+    const stackedChart = screen.getByRole('img', { name: '基金地区构成堆叠图' })
+    const averageChart = screen.getByRole('img', { name: '基金池平均地区分布条形图' })
+    const stackedOption = JSON.parse(stackedChart.getAttribute('data-option') ?? '{}')
+    const averageOption = JSON.parse(averageChart.getAttribute('data-option') ?? '{}')
+    expect(stackedOption.yAxis.data).toEqual([
+      '华夏全球科技先锋混合\n005698',
+      '华夏移动互联混合\n002891',
+    ])
+    expect(stackedOption.series.map((item: { name: string }) => item.name)).toEqual([
+      '美国', '日本', '韩国', '中国香港', '中国内地', '其他分类', '未披露',
+    ])
+    expect(stackedOption.series.map((item: { itemStyle: { color: string } }) => item.itemStyle.color)).toEqual([
+      '#24364b', '#ffffff', '#171717', '#9e1b64', '#d43f3a', '#5f6872', '#d9dde2',
+    ])
+    expect(averageOption.yAxis.data).toEqual([
+      '美国', '日本', '韩国', '中国香港', '中国内地', '其他分类', '未披露',
+    ])
 
     await user.selectOptions(screen.getByRole('combobox', { name: '报告季度' }), '2026-Q1')
     expect(fetchMock).toHaveBeenCalledWith(
