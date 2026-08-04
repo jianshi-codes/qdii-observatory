@@ -20,3 +20,12 @@
 PostgreSQL 默认使用 named volume。若要 bind mount：设置 `QDII_PG_VOLUME_TYPE=bind` 与 `QDII_PG_DATA_SOURCE=./.data/postgres`，先确认目录容量和权限。
 
 默认 Docker 模式固定使用内置 PostgreSQL。外部模式必须显式执行 `make docker-up-external`；只设置 URL 后运行 `make docker-up` 不会切换数据库。外部 database 建议专用；默认必须预先存在，也可以按 [external-postgresql.md](external-postgresql.md) 显式授权一次性自动建库。
+
+## 本地研究覆盖配置
+
+`qdii init` 会在文件不存在时创建以下 ignored 文件，不覆盖已有内容：
+
+- `config/fund-analysis-proxies.local.yaml`：按基金配置市场代理、对齐覆盖和可选一致性阈值；在公开的空基金基线上合并，本地字段优先。
+- `config/analysis-security-map.local.yaml`：补充或覆盖披露证券标识到行情代码的人工映射；相同证券代码和市场组合由本地条目优先。
+
+可分别从 `config/fund-analysis-proxies.example.yaml` 和 `config/analysis-security-map.example.yaml` 复制结构。公开仓库只保留通用规则、synthetic 示例和可复用的公开证券映射；用户基金代理不得加入跟踪文件。

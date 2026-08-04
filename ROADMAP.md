@@ -2,20 +2,16 @@
 
 ## v0.1-alpha
 
-- 独立本地部署、通用 universe、任意季度。
-- 季报解析、净值、基金关系、穿透、比较。
-- 按需披露持仓一致性、可选本地 Portfolio。
-- 开源治理、隐私与数据许可边界。
+- 独立本地部署、外部 PostgreSQL 安全预检、通用 universe、任意季度。
+- 公开基金选择、Provider health、季报解析、日常数据、基金关系、穿透和比较。
+- 按需披露持仓一致性、可选本地 Portfolio、导入预览和定投确认台账。
+- 开源治理、隐私、数据许可、fixture 与公开发布门禁。
 
 ## v0.2
 
-- Provider Health UI 与 Starter Packs。
-- Parser Fixture Contribution Kit 扩展。
-- 导入/导出、Backup/Restore UX、更多基金公司格式。
+- 更多基金公司报告与限额格式，并扩展可再分发的最小 parser fixture 套件。
+- 在 UI 中补齐备份/恢复前置检查和可撤销的数据导出流程。
+- 自动生成并人工复核每个发布版本的依赖许可证清单。
+- 提取正式业绩比较基准并建立可追溯的定价映射，减少手工代理。
 
-## v0.3
-
-- 可选 LLM Adapter（默认关闭且不进入核心数据路径）。
-- Policy-based Portfolio review、交易流水与更多市场数据源。
-
-不承诺自动交易、全市场主数据、多用户云服务或所有基金公司 parser 全覆盖。
+不承诺自动交易、全市场主数据、多用户云服务、账户连接或所有基金公司 parser 全覆盖。
