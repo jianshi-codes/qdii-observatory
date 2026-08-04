@@ -1,5 +1,7 @@
 .DS_Store
 .env
+.env.*
+!.env.example
 .venv/
 .data/
 config/*.local.yaml
@@ -20,3 +22,11 @@ tmp/
 backups/
 outputs/
 ~$*.xlsx
+*.xlsx
+!frontend/public/templates/*.xlsx
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.backup

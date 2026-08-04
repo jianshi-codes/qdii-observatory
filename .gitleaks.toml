@@ -1,0 +1,12 @@
+title = "QDII Observatory secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "UI column identifier is not an API key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+regexes = ['''disclosed_top10_pct''']
+paths = ['''(?:^|/)frontend/src/pages/FundOverviewPage\.tsx$''']

@@ -1,7 +1,10 @@
-# Optional user-maintained aliases for disclosed securities. No personal defaults are shipped.
-securities:
-  EXAMPLE-US:
-    canonical_name: Example Technology Corp
-    market: US
+# Copy to analysis-security-map.local.yaml. Local entries take priority over the
+# public deterministic/manual mapping baseline and are ignored by Git.
+version: 1
+mappings:
+  - match:
+      security_code_raw: EXAMPLE-US
+      market: US
+    symbol: EXAMPLE
     currency: USD
-    proxy_symbol: null
+    reason: Synthetic example; replace it with a verified security identifier mapping.

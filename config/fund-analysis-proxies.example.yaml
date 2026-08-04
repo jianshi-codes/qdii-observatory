@@ -1,6 +1,16 @@
-# Copy to fund-analysis-proxies.local.yaml. The local file is ignored by Git.
+# Copy to fund-analysis-proxies.local.yaml. The local file is ignored by Git and
+# is merged over the public baseline in fund-analysis-proxies.yaml.
+version: 1
+alignment_overrides: {}
 funds:
   "123456":
-    benchmark_name: synthetic disclosed holdings proxy
-    # CSV columns: date,estimated_return_pct. Use public/licensed or user-created data only.
+    proxies:
+      - symbol: EXAMPLE
+        currency: USD
+        weight: 1.00
+    reason: Synthetic example; replace it with a traceable benchmark or proxy.
+    confidence: LOW
+    # Optional legacy CLI series. CSV columns: date,estimated_return_pct.
+    # Use public/licensed or user-created data only.
     estimated_returns_file: .data/private/synthetic-estimated-returns.csv
+consistency_rules: {}

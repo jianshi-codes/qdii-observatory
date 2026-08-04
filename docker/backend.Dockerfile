@@ -9,7 +9,8 @@ COPY backend ./backend
 COPY migrations ./migrations
 COPY config ./config
 COPY examples ./examples
-RUN pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir --upgrade "pip>=26.1.2,<27" \
+    && python -m pip install --no-cache-dir .
 
 EXPOSE 8000
 CMD ["sh", "-c", "python -m backend.app.wait_for_db && python -m backend.app.database_preflight && python -m alembic upgrade head && python -m backend.app.database_preflight --require-head && exec uvicorn backend.app.main:app --host 0.0.0.0 --port 8000"]

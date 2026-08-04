@@ -9,7 +9,7 @@ import {
   X,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink } from 'react-router'
 
 const navigation = [
   { to: '/', label: '基金总览', icon: BarChart3, end: true },

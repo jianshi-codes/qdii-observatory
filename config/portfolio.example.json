@@ -6,6 +6,7 @@
       "platform": "示例平台",
       "snapshot_date": "2025-01-31",
       "currency": "CNY",
+      "units": "1000.00",
       "market_value": "1234.56",
       "holding_return_pct": "1.25",
       "holding_profit": "15.43",
@@ -15,7 +16,8 @@
         "frequency": "DAILY",
         "gross_amount": "100.00",
         "fee_pct": "0.15",
-        "net_amount": "99.85"
+        "net_amount": "99.85",
+        "confirmation_lag_days": 2
       },
       "cash_flows": [
         {
