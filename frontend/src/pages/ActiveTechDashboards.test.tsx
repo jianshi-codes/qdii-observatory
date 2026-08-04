@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { exportDashboardPng } from '../lib/exportDashboardPng'
@@ -35,15 +35,30 @@ const returnsPayload = {
   latest_official_nav_date: '2026-08-01',
   common_comparable_date: '2026-07-31',
   configured_fund_count: 18,
-  fund_count: 2,
-  comparable_fund_count: 1,
+  fund_count: 3,
+  comparable_fund_count: 2,
   missing_fund_count: 1,
   stale_fund_count: 0,
   positive_fund_count: 1,
-  negative_fund_count: 0,
-  average_return_pct: '1.25',
-  median_return_pct: '1.25',
+  negative_fund_count: 1,
+  average_return_pct: '0.375',
+  median_return_pct: '0.375',
   items: [
+    {
+      fund_id: 3,
+      representative_code: '100055',
+      fund_name: '富国全球科技互联网股票',
+      original_category: '全球科技/互联网',
+      pool_segment: 'CORE',
+      share_code: '100055',
+      return_pct: '-0.50',
+      baseline_date: '2026-07-30',
+      end_date: '2026-07-31',
+      latest_official_nav_date: '2026-08-01',
+      nav_lag_days: 3,
+      uses_accumulated_nav: false,
+      status: 'READY',
+    },
     {
       fund_id: 1,
       representative_code: '002891',
@@ -163,10 +178,21 @@ describe('active technology dashboards', () => {
     renderPage(<ActiveTechReturnsPage />)
 
     expect(await screen.findByText('主动科技 QDII 收益看板')).toBeInTheDocument()
-    expect((await screen.findAllByText('+1.25%')).length).toBeGreaterThanOrEqual(2)
+    expect((await screen.findAllByText('+0.38%')).length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('缺少区间基准')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: '每日收益分布直方图' })).toBeInTheDocument()
     expect(screen.getAllByText('2026/07/31').length).toBeGreaterThanOrEqual(1)
+    const table = screen.getByRole('table')
+    const returnHeader = within(table).getByRole('columnheader', { name: '每日收益' })
+    expect(returnHeader).toHaveAttribute('aria-sort', 'descending')
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('002891')
+
+    await user.click(within(returnHeader).getByRole('button', { name: '每日收益' }))
+    expect(returnHeader).toHaveAttribute('aria-sort', 'ascending')
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('100055')
+
+    await user.click(within(table).getByRole('button', { name: '基金' }))
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('002891')
 
     await user.selectOptions(screen.getByRole('combobox', { name: '基金池' }), 'BROAD')
     expect(await screen.findByRole('combobox', { name: '基金池' })).toHaveValue('BROAD')

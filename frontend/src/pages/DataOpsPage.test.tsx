@@ -14,10 +14,14 @@ function response(body: unknown) {
   }))
 }
 
-it('calculates the current-quarter history range from the quarter start', () => {
+it('calculates the current-quarter history range with a baseline buffer', () => {
   expect(currentQuarterHistory(new Date(2026, 7, 3))).toEqual({
-    startDate: '2026-07-01',
-    lookbackDays: 33,
+    startDate: '2026-06-24',
+    lookbackDays: 40,
+  })
+  expect(currentQuarterHistory(new Date(2026, 11, 31))).toEqual({
+    startDate: '2026-09-24',
+    lookbackDays: 98,
   })
 })
 
