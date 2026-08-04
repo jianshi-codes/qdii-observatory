@@ -17,11 +17,18 @@ function response(body: unknown) {
 it('calculates the current-quarter history range with a baseline buffer', () => {
   expect(currentQuarterHistory(new Date(2026, 7, 3))).toEqual({
     startDate: '2026-06-24',
+    previousQuarterEndDate: '2026-06-30',
     lookbackDays: 40,
   })
   expect(currentQuarterHistory(new Date(2026, 11, 31))).toEqual({
     startDate: '2026-09-24',
+    previousQuarterEndDate: '2026-09-30',
     lookbackDays: 98,
+  })
+  expect(currentQuarterHistory(new Date(2026, 0, 2))).toEqual({
+    startDate: '2025-12-25',
+    previousQuarterEndDate: '2025-12-31',
+    lookbackDays: 8,
   })
 })
 
@@ -400,12 +407,15 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(screen.getByRole('button', { name: '解析报告并计算穿透' })).toBeDisabled()
     const dailyButton = screen.getByRole('button', { name: '同步近 10 天每日数据' })
     const limitButton = screen.getByRole('button', { name: '仅刷新今日限额' })
-    const quarterButton = screen.getByRole('button', { name: '同步本季度数据' })
+    const quarterButton = screen.getByRole('button', { name: '同步本季度数据（含上季末）' })
     const reportButton = screen.getByRole('button', { name: '下载 2026 Q2 报告' })
     expect(document.getElementById(dailyButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent('全部基金近 10 个日历日')
     expect(document.getElementById(limitButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent('直销和代销')
     expect(document.getElementById(quarterButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent(
       currentQuarterHistory().startDate.replaceAll('-', '/'),
+    )
+    expect(document.getElementById(quarterButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent(
+      currentQuarterHistory().previousQuarterEndDate.replaceAll('-', '/'),
     )
     expect(document.getElementById(reportButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent('不会解析持仓')
     expect(screen.getByRole('button', { name: '解析报告并计算穿透' }).closest('.preparation-action-help')).toHaveAttribute('tabindex', '0')

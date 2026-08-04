@@ -549,7 +549,7 @@ function DataPreparationPanel({
               <PreparationActionButton className="button button-secondary" disabled={operationBusy || !selectedFundCode} help={`${historyRangeHelp}；场内基金同时更新价格，并刷新今日限额和估值所需汇率。不会下载或解析季度报告。手动提交会创建新的同步任务，不复用今日旧任务。`} onClick={() => onRun('sync-daily', [selectedFundCode], lookbackDays)}>
                 <History size={15} />补历史净值
               </PreparationActionButton>
-              <PreparationActionButton className="button button-primary" disabled={operationBusy || !selectedFundCode} help={`${preparationActionHelp.prepare} 为覆盖季初收益基准，从 ${formatDate(quarterHistory.startDate)} 开始。`} onClick={() => onRun('prepare', [selectedFundCode], quarterHistory.lookbackDays)}>
+              <PreparationActionButton className="button button-primary" disabled={operationBusy || !selectedFundCode} help={`${preparationActionHelp.prepare} 同步包含 ${formatDate(quarterHistory.previousQuarterEndDate)} 的上季度末基准；为兼容非交易日，从 ${formatDate(quarterHistory.startDate)} 开始。`} onClick={() => onRun('prepare', [selectedFundCode], quarterHistory.lookbackDays)}>
                 <Play size={15} />按本季度补齐全部阶段
               </PreparationActionButton>
             </div>
@@ -584,11 +584,11 @@ function DataPreparationPanel({
                 <div className="preparation-maintenance-copy">
                   <span>QUARTER DATA</span>
                   <strong>本季度数据</strong>
-                  <small>含季初前 7 天基准缓冲，从 {formatDate(quarterHistory.startDate)} 补净值和价格；历史限额不回填。</small>
+                  <small>同步包含上季度末 {formatDate(quarterHistory.previousQuarterEndDate)}；为兼容非交易日，从 {formatDate(quarterHistory.startDate)} 回看。</small>
                 </div>
                 <div className="preparation-maintenance-actions">
-                  <PreparationActionButton className="button button-secondary" disabled={operationBusy} help={`含季初前 7 天基准缓冲，从 ${formatDate(quarterHistory.startDate)} 起同步全部基金净值和场内价格，并刷新当前限额与汇率。`} onClick={() => onRun('sync-daily', [], quarterHistory.lookbackDays)}>
-                    <History size={15} />同步本季度数据
+                  <PreparationActionButton className="button button-secondary" disabled={operationBusy} help={`同步包含 ${formatDate(quarterHistory.previousQuarterEndDate)} 的上季度末数据；为兼容周末或节假日，从 ${formatDate(quarterHistory.startDate)} 起同步全部基金净值和场内价格，并刷新当前限额与汇率。`} onClick={() => onRun('sync-daily', [], quarterHistory.lookbackDays)}>
+                    <History size={15} />同步本季度数据（含上季末）
                   </PreparationActionButton>
                 </div>
               </article>
