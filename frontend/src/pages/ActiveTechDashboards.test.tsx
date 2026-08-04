@@ -92,6 +92,31 @@ const returnsPayload = {
   ],
 }
 
+const returnsByPeriod = {
+  DAILY: { average: '0.375', first: '-0.50', second: '1.25', baseline: '2026-07-30' },
+  MTD: { average: '1.00', first: '4.00', second: '-2.00', baseline: '2026-07-31' },
+  QTD: { average: '-4.00', first: '5.00', second: '-13.00', baseline: '2026-06-30' },
+}
+
+function returnsPayloadFor(period: keyof typeof returnsByPeriod) {
+  const values = returnsByPeriod[period]
+  return {
+    ...returnsPayload,
+    period,
+    average_return_pct: values.average,
+    median_return_pct: values.average,
+    negative_fund_count: 1,
+    positive_fund_count: 1,
+    items: returnsPayload.items.map((item) => ({
+      ...item,
+      return_pct: item.representative_code === '100055'
+        ? values.first
+        : item.representative_code === '002891' ? values.second : null,
+      baseline_date: item.representative_code === '005698' ? null : values.baseline,
+    })),
+  }
+}
+
 const regionsPayload = {
   pool: 'CORE',
   basis: 'DIRECT',
@@ -171,24 +196,39 @@ describe('active technology dashboards', () => {
     vi.clearAllMocks()
   })
 
-  it('renders return metrics, quality status, filters, and PNG export', async () => {
-    const fetchMock = vi.fn(() => response(returnsPayload))
+  it('renders all return periods together with sortable headers and PNG export', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const period = new URL(String(input), 'http://local').searchParams.get('period') as keyof typeof returnsByPeriod
+      return response(returnsPayloadFor(period))
+    })
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     renderPage(<ActiveTechReturnsPage />)
 
     expect(await screen.findByText('主动科技 QDII 收益看板')).toBeInTheDocument()
-    expect((await screen.findAllByText('+0.38%')).length).toBeGreaterThanOrEqual(2)
-    expect(screen.getByText('缺少区间基准')).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: '每日收益分布直方图' })).toBeInTheDocument()
+    expect(await screen.findByText('+0.38%')).toBeInTheDocument()
+    expect(screen.getByText('+1.00%')).toBeInTheDocument()
+    expect(screen.getByText('-4.00%')).toBeInTheDocument()
+    expect(screen.getAllByText('缺少区间基准')).toHaveLength(3)
+    const chart = screen.getByRole('img', { name: '每日、本月、本季度收益概览柱状图' })
+    const chartOption = JSON.parse(chart.getAttribute('data-option') ?? '{}')
+    expect(chartOption.yAxis.data).toEqual(['每日', '本月 MTD', '本季度 QTD'])
+    expect(chartOption.series.map((series: { name: string }) => series.name)).toEqual(['平均值', '中位数'])
+    expect(chartOption.series[0].data.map((item: { value: number }) => item.value)).toEqual([0.375, 1, -4])
+    expect(chartOption.series[0].data[2].label.position).toBe('insideLeft')
+    expect(chartOption.series[0].data[2].label.color).toBe('#ffffff')
+    expect(chartOption.series[0].data[1].label.position).toBe('right')
     expect(screen.getAllByText('2026/07/31').length).toBeGreaterThanOrEqual(1)
     const table = screen.getByRole('table')
-    const returnHeader = within(table).getByRole('columnheader', { name: '每日收益' })
-    expect(returnHeader).toHaveAttribute('aria-sort', 'descending')
-    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('002891')
+    expect(within(table).getByRole('columnheader', { name: '本季度 QTD' })).toHaveAttribute('aria-sort', 'descending')
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('100055')
 
-    await user.click(within(returnHeader).getByRole('button', { name: '每日收益' }))
-    expect(returnHeader).toHaveAttribute('aria-sort', 'ascending')
+    const dailyHeader = within(table).getByRole('columnheader', { name: '每日' })
+    await user.click(within(dailyHeader).getByRole('button', { name: '每日' }))
+    expect(dailyHeader).toHaveAttribute('aria-sort', 'descending')
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('002891')
+    await user.click(within(dailyHeader).getByRole('button', { name: '每日' }))
+    expect(dailyHeader).toHaveAttribute('aria-sort', 'ascending')
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('100055')
 
     await user.click(within(table).getByRole('button', { name: '基金' }))
@@ -197,7 +237,7 @@ describe('active technology dashboards', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: '基金池' }), 'BROAD')
     expect(await screen.findByRole('combobox', { name: '基金池' })).toHaveValue('BROAD')
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/dashboards/active-tech/returns?pool=BROAD&period=DAILY',
+      '/api/dashboards/active-tech/returns?pool=BROAD&period=QTD',
       expect.any(Object),
     )
 
