@@ -17,7 +17,7 @@
 
 - 项目名统一为 QDII Observatory / QDII 基金观察台 / `qdii-observatory`。
 - universe、季度边界、Provider、Portfolio 和部署配置改为用户输入及环境配置。
-- Portfolio 示例与模板不含用户行；模块默认关闭。
+- Portfolio 示例与模板不含用户行；模块默认开启但初始为空，可通过环境变量关闭。
 - 基金代理从 tracked 配置移至 ignored 的 `config/fund-analysis-proxies.local.yaml`；公开基线只保留通用一致性规则。
 - 文档、测试与 CI 改为公开、可复现、无真实网络依赖的边界。
 
@@ -30,7 +30,7 @@
 
 ## 可选能力
 
-- Portfolio 是显式环境开关控制的本地扩展。
+- Portfolio 是默认开启、可通过显式环境开关关闭的本地扩展。
 - Provider 可按本地配置启用、禁用和排序。
 - 公开示例基金只用于演示输入格式，不构成默认投资池。
 

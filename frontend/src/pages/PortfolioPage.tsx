@@ -643,7 +643,7 @@ export function PortfolioPage() {
       {capabilityQuery.isPending && <LoadingPanel label="正在确认本地持仓能力…" />}
       {capabilityQuery.isError && <ErrorPanel error={capabilityQuery.error} onRetry={() => capabilityQuery.refetch()} />}
       {capabilityQuery.isSuccess && !portfolioEnabled && (
-        <EmptyPanel title="本地持仓尚未启用" detail="入口会保持可见；在本机 .env 设置 QDII_ENABLE_PORTFOLIO=true 并重启后即可导入，项目不会连接真实账户。" />
+        <EmptyPanel title="本地持仓当前已关闭" detail="当前环境显式关闭了持仓能力；删除 QDII_ENABLE_PORTFOLIO=false 覆盖或改为 true，并重启后即可导入。项目不会连接真实账户。" />
       )}
       {portfolioEnabled && (
         <PortfolioImportPanel

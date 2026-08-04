@@ -25,7 +25,7 @@ def _boolean_env(name: str, *, default: bool = False) -> bool:
 class Settings:
     database_url: str
     api_prefix: str = "/api"
-    portfolio_enabled: bool = False
+    portfolio_enabled: bool = True
     cors_origins: tuple[str, ...] = DEFAULT_CORS_ORIGINS
 
 
@@ -41,6 +41,6 @@ def get_settings() -> Settings:
     )
     return Settings(
         database_url=database_url,
-        portfolio_enabled=_boolean_env("QDII_ENABLE_PORTFOLIO"),
+        portfolio_enabled=_boolean_env("QDII_ENABLE_PORTFOLIO", default=True),
         cors_origins=cors_origins,
     )

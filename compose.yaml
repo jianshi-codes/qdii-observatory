@@ -29,7 +29,7 @@ services:
       QDII_DATABASE_URL: postgresql+psycopg://${QDII_POSTGRES_USER:-qdii}:${QDII_POSTGRES_PASSWORD}@postgres:5432/${QDII_POSTGRES_DB:-qdii_observatory}
       QDII_RAW_DATA_DIR: /data/raw
       QDII_MANAGED_DATA_ROOT: /data
-      QDII_ENABLE_PORTFOLIO: ${QDII_ENABLE_PORTFOLIO:-false}
+      QDII_ENABLE_PORTFOLIO: ${QDII_ENABLE_PORTFOLIO:-true}
       QDII_CORS_ORIGINS: http://${QDII_BIND_HOST:-127.0.0.1}:${QDII_FRONTEND_PORT:-5173}
     ports:
       - "${QDII_BIND_HOST:-127.0.0.1}:${QDII_BACKEND_PORT:-8000}:8000"
@@ -51,7 +51,7 @@ services:
       QDII_DATABASE_URL: postgresql+psycopg://${QDII_POSTGRES_USER:-qdii}:${QDII_POSTGRES_PASSWORD}@postgres:5432/${QDII_POSTGRES_DB:-qdii_observatory}
       QDII_RAW_DATA_DIR: /data/raw
       QDII_MANAGED_DATA_ROOT: /data
-      QDII_ENABLE_PORTFOLIO: ${QDII_ENABLE_PORTFOLIO:-false}
+      QDII_ENABLE_PORTFOLIO: ${QDII_ENABLE_PORTFOLIO:-true}
     volumes:
       - ${QDII_DATA_DIR:-./.data}:/data
     depends_on:

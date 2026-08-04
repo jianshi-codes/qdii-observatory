@@ -4,7 +4,7 @@
 
 - [x] 当前 tracked tree 不含个人 Excel、生成 coverage、真实 Portfolio、完整第三方 PDF、`.env` 或 `.data/`。
 - [x] `.env`、`.data/`、本地 override、backup 和缓存已 ignore。
-- [x] 默认只绑定 loopback；Portfolio 默认关闭。
+- [x] 默认只绑定 loopback；Portfolio 默认开启但初始为空，可通过环境变量关闭。
 - [x] Apache-2.0、NOTICE、免责声明、隐私、数据许可和安全政策已提供。
 - [x] README、架构、配置、数据模型、解析、穿透、分析与运维文档已提供。
 - [x] CI 仅依赖 fixture，不访问真实 Provider。
