@@ -30,6 +30,7 @@ POSITION_FIELDS: dict[str, tuple[str, ...]] = {
     "platform": ("平台", "platform"),
     "snapshot_date": ("快照日期", "snapshot_date"),
     "currency": ("币种", "currency"),
+    "units": ("持有份额", "份额", "units"),
     "market_value": ("当前市值", "market_value"),
     "holding_profit": ("持有收益", "holding_profit"),
     "holding_return_pct": ("持有收益率", "holding_return_pct"),
@@ -167,6 +168,7 @@ def build_portfolio_preview(
                 "platform": platform,
                 "snapshot_date": raw["snapshot_date"],
                 "currency": supplied_currency or expected_currency,
+                "units": raw["units"],
                 "market_value": raw["market_value"],
                 "holding_profit": raw["holding_profit"],
                 "holding_return_pct": raw["holding_return_pct"],
@@ -215,7 +217,11 @@ def _parse_positions(
     errors: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[tuple[str, str], int]]:
     rows = read_sheet(BytesIO(content), "持仓")
-    header_index, headers = _header(rows, POSITION_FIELDS, required=("share_code", "platform"))
+    header_index, headers = _header(
+        rows,
+        POSITION_FIELDS,
+        required=("share_code", "platform", "units"),
+    )
     positions: list[dict[str, Any]] = []
     position_rows: dict[tuple[str, str], int] = {}
     for index, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
@@ -274,6 +280,7 @@ def _position(raw: dict[str, str]) -> dict[str, Any]:
     snapshot_date = _date(raw.get("snapshot_date"), "快照日期")
     if snapshot_date > date.today():
         raise ValueError("快照日期不能晚于今天")
+    units = _decimal(raw.get("units"), "持有份额", positive=True)
     market_value = _decimal(raw.get("market_value"), "当前市值", positive=True)
     holding_profit = _decimal(raw.get("holding_profit"), "持有收益")
     holding_return = _percent(raw.get("holding_return_pct"), "持有收益率", required=True)
@@ -285,6 +292,7 @@ def _position(raw: dict[str, str]) -> dict[str, Any]:
         "platform": platform,
         "snapshot_date": snapshot_date,
         "currency": currency or None,
+        "units": str(units),
         "market_value": str(market_value),
         "holding_profit": str(holding_profit),
         "holding_return_pct": str(holding_return),

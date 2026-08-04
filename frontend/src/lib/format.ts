@@ -85,9 +85,24 @@ export function techScopeLabel(value: unknown): string {
   return techScopeLabels[value] ?? value.replaceAll('_', ' ')
 }
 
+export const researchScopeLabels: Record<string, string> = {
+  TECHNOLOGY: '科技相关',
+  EQUITY: '权益',
+  FIXED_INCOME: '固收',
+  COMMODITY: '商品',
+  REAL_ESTATE: '房地产 / REITs',
+  OTHER: '其他',
+}
+
+export function researchScopeLabel(value: unknown): string {
+  if (typeof value !== 'string' || !value) return '其他'
+  return researchScopeLabels[value] ?? value.replaceAll('_', ' ')
+}
+
 export function wrapperLabel(value: unknown): string {
   if (typeof value !== 'string' || !value) return 'wrapper 待识别'
   const labels: Record<string, string> = {
+    DIRECT: '直接持股',
     ETF_FEEDER: 'ETF 联接',
     ETF: 'ETF',
     LOF: 'LOF',
@@ -120,13 +135,13 @@ export function reportTypeLabel(value: unknown): string {
 
 export function issueTone(value: unknown): 'good' | 'warn' | 'bad' | 'neutral' {
   const normalized = String(value ?? '').toLowerCase()
-  if (['success', 'succeeded', 'healthy', 'parsed', 'valid_empty', 'completed', 'resolved', 'direct_only', 'closed'].includes(normalized)) {
+  if (['success', 'succeeded', 'healthy', 'parsed', 'valid_empty', 'completed', 'resolved', 'direct_only', 'closed', 'consistent'].includes(normalized)) {
     return 'good'
   }
-  if (['warning', 'low_confidence', 'degraded', 'rate_limited', 'partial', 'queued', 'running', 'pending', 'unresolved', 'open'].includes(normalized)) {
+  if (['warning', 'low_confidence', 'degraded', 'rate_limited', 'partial', 'queued', 'running', 'pending', 'unresolved', 'open', 'slightly_diverging', 'insufficient_data'].includes(normalized)) {
     return 'warn'
   }
-  if (['error', 'failed', 'failed_with_reason', 'schema_changed', 'circular_relation_detected', 'critical', 'high'].includes(normalized)) {
+  if (['error', 'failed', 'failed_with_reason', 'schema_changed', 'circular_relation_detected', 'critical', 'high', 'likely_exposure_changed'].includes(normalized)) {
     return 'bad'
   }
   return 'neutral'
@@ -180,6 +195,11 @@ export function statusLabel(value: unknown): string {
     medium: '中',
     high: '高',
     critical: '严重',
+    consistent: '一致',
+    slightly_diverging: '轻微偏离',
+    likely_exposure_changed: '可能已调整持仓',
+    insufficient_data: '数据不足',
+    not_applicable: '不适用',
   }
   return labels[normalized] ?? (value ? String(value) : '状态未知')
 }

@@ -42,16 +42,17 @@ def _filled_workbook(
         "B5": platform,
         "C5": "2026-08-01",
         "D5": "CNY",
-        "E5": "10000",
-        "F5": "500",
-        "G5": "0.05",
-        "H5": "750",
-        "I5": "100",
-        "J5": "0.0015",
+        "E5": "8000",
+        "F5": "10000",
+        "G5": "500",
+        "H5": "0.05",
+        "I5": "750",
+        "J5": "100",
         "K5": "0.0015",
-        "L5": "0.012",
-        "M5": "0.002",
-        "N5": "是",
+        "L5": "0.0015",
+        "M5": "0.012",
+        "N5": "0.002",
+        "O5": "是",
     }
     with ZipFile(TEMPLATE) as source, ZipFile(output, "w", ZIP_DEFLATED) as target:
         for item in source.infolist():
@@ -119,6 +120,7 @@ def test_portfolio_template_parses_typed_percentages_and_preview_restore(
     preview = build_portfolio_preview(db_session, workbook, SimpleNamespace())
 
     assert workbook.payload["positions"][0]["holding_return_pct"] == "5.00"
+    assert workbook.payload["positions"][0]["units"] == "8000"
     assert workbook.payload["positions"][0]["purchase_fee_pct"] == "0.1500"
     assert preview["valid"] is True
     assert preview["positions"][0]["universe_action"] == "RESTORE"
@@ -169,6 +171,7 @@ def test_confirm_portfolio_import_restores_fund_and_writes_position(
     assert fund.is_user_selected is True
     position = db_session.scalar(select(PortfolioPosition))
     assert position is not None
+    assert position.reported_units == Decimal("8000.00000000")
     assert position.reported_market_value == Decimal("10000.000000")
     assert position.reported_return_pct == Decimal("5.00000000")
 

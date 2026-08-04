@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataPreparationStatus } from '../api/types'
+import { currentQuarterHistory } from '../lib/operations'
 import { DataOpsPage } from './DataOpsPage'
 
 function response(body: unknown) {
@@ -13,10 +14,18 @@ function response(body: unknown) {
   }))
 }
 
+it('calculates the current-quarter history range from the quarter start', () => {
+  expect(currentQuarterHistory(new Date(2026, 7, 3))).toEqual({
+    startDate: '2026-07-01',
+    lookbackDays: 33,
+  })
+})
+
 function preparationStatus(totalFunds = 0): DataPreparationStatus {
   return {
     active_operation: null,
     latest_operation: null,
+    latest_daily_operation: null,
     total_funds: totalFunds,
     total_shares: totalFunds,
     nav_ready_funds: 0,
@@ -108,7 +117,7 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(coverageButtons).toHaveLength(2)
     for (const button of coverageButtons) {
       expect(button).not.toHaveAttribute('title')
-      expect(document.getElementById(button.getAttribute('aria-describedby') ?? '')).toHaveTextContent('同步近 10 天净值')
+      expect(document.getElementById(button.getAttribute('aria-describedby') ?? '')).toHaveTextContent('当前季度首日')
     }
     expect(screen.getByText('渠道覆盖不完整')).toBeInTheDocument()
     expect(screen.getByText('SALES_LIMIT_COVERAGE_INCOMPLETE')).toBeInTheDocument()
@@ -271,6 +280,11 @@ describe('DataOpsPage purchase-limit coverage', () => {
       run_ids: [5, 6, 7],
       records_written: 70,
       records_failed: 8,
+      recurring_orders_created: 0,
+      recurring_orders_settled: 0,
+      recurring_executions_written: 0,
+      recurring_positions_updated: 0,
+      recurring_latest_nav_date: null,
       started_at: '2026-08-03T04:30:00Z',
       finished_at: '2026-08-03T04:42:00Z',
       error_message: null,
@@ -345,13 +359,17 @@ describe('DataOpsPage purchase-limit coverage', () => {
       })
       if (path === '/api/operations/prepare') {
         expect(init?.method).toBe('POST')
-        expect(init?.body).toBe(JSON.stringify({ fund_codes: ['900001'], lookback_days: 10 }))
+        expect(init?.body).toBe(JSON.stringify({
+          fund_codes: ['900001'],
+          lookback_days: currentQuarterHistory().lookbackDays,
+          force: true,
+        }))
         return response({
           id: 9,
           operation: 'prepare',
           status: 'queued',
           fund_codes: ['900001'],
-          lookback_days: 10,
+          lookback_days: currentQuarterHistory().lookbackDays,
           report_year: 2026,
           report_quarter: 2,
           current_stage: null,
@@ -376,16 +394,21 @@ describe('DataOpsPage purchase-limit coverage', () => {
     expect(screen.getByText('净值与价格')).toBeInTheDocument()
     expect(screen.getByText('穿透计算')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '解析报告并计算穿透' })).toBeDisabled()
-    const dailyButton = screen.getByRole('button', { name: '同步日常数据' })
-    const limitButton = screen.getByRole('button', { name: '仅同步今日限额' })
-    const reportButton = screen.getByRole('button', { name: '获取 2026 Q2 报告' })
-    expect(document.getElementById(dailyButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent('近 10 天基金净值')
+    const dailyButton = screen.getByRole('button', { name: '同步近 10 天每日数据' })
+    const limitButton = screen.getByRole('button', { name: '仅刷新今日限额' })
+    const quarterButton = screen.getByRole('button', { name: '同步本季度数据' })
+    const reportButton = screen.getByRole('button', { name: '下载 2026 Q2 报告' })
+    expect(document.getElementById(dailyButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent('全部基金近 10 个日历日')
     expect(document.getElementById(limitButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent('直销和代销')
+    expect(document.getElementById(quarterButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent(
+      currentQuarterHistory().startDate.replaceAll('-', '/'),
+    )
     expect(document.getElementById(reportButton.getAttribute('aria-describedby') ?? '')).toHaveTextContent('不会解析持仓')
     expect(screen.getByRole('button', { name: '解析报告并计算穿透' }).closest('.preparation-action-help')).toHaveAttribute('tabindex', '0')
+    expect(screen.getAllByRole('option', { name: '近 5 个日历日' })).toHaveLength(2)
 
     await user.selectOptions(screen.getByRole('combobox', { name: '选择要补齐的基金' }), '900001')
-    await user.click(screen.getByRole('button', { name: '补齐这一只' }))
+    await user.click(screen.getByRole('button', { name: '按本季度补齐全部阶段' }))
 
     expect(await screen.findByText(/任务 #9：已排队/)).toBeInTheDocument()
     expect(screen.getByText(/阶段 0 \/ 3/)).toBeInTheDocument()
@@ -393,6 +416,95 @@ describe('DataOpsPage purchase-limit coverage', () => {
       '/api/operations/prepare',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('submits a forced manual retry even when a newer unrelated task exists', async () => {
+    const user = userEvent.setup()
+    const status = preparationStatus(1)
+    status.latest_operation = {
+      id: 12,
+      operation: 'sync-daily',
+      status: 'succeeded',
+      fund_codes: ['160644'],
+      lookback_days: 30,
+      report_year: 2026,
+      report_quarter: 2,
+      current_stage: null,
+      stage_completed: 1,
+      stage_total: 1,
+      run_ids: [52],
+      records_written: 22,
+      records_failed: 0,
+      recurring_orders_created: 0,
+      recurring_orders_settled: 0,
+      recurring_executions_written: 0,
+      recurring_positions_updated: 0,
+      recurring_latest_nav_date: null,
+      created_at: '2026-08-03T13:56:00Z',
+      started_at: '2026-08-03T13:56:00Z',
+      finished_at: '2026-08-03T13:56:10Z',
+      error_message: null,
+    }
+    const retry = {
+      ...status.latest_operation,
+      id: 14,
+      status: 'queued',
+      fund_codes: ['002891'],
+      records_written: 0,
+      run_ids: [],
+      created_at: '2026-08-03T14:45:26Z',
+      started_at: null,
+      finished_at: null,
+    }
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/funds') return response({ items: [{
+        id: 34,
+        canonical_name: '华夏移动互联混合人民币',
+        manager_name: '华夏基金',
+        representative_code: '002891',
+      }] })
+      if (path === '/api/ingestion-runs') return response({ items: [] })
+      if (path === '/api/data-quality-issues') return response({ items: [] })
+      if (path === '/api/purchase-limit-coverage') return response({
+        total_funds: 1,
+        covered_funds: 1,
+        total_shares: 1,
+        covered_shares: 1,
+        latest_snapshot_date: '2026-08-03',
+        availability_state_counts: {},
+        cap_state_counts: {},
+      })
+      if (path === '/api/provider-health') return response({ items: [] })
+      if (path === '/api/operations/preparation-status') return response(status)
+      if (path === '/api/fund-catalog/options') return response({
+        companies: [],
+        source_categories: [{ value: 'ALL', label: '全部来源分类' }],
+        research_scopes: [{ value: 'ALL', label: '全部 QDII' }],
+        source_provider: 'fixture',
+        source_notice: '公开来源提示',
+      })
+      if (path === '/api/operations/sync-daily') {
+        expect(init?.body).toBe(JSON.stringify({ fund_codes: ['002891'], lookback_days: 30, force: true }))
+        return response(retry)
+      }
+      throw new Error(`unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+
+    await user.selectOptions(
+      await screen.findByRole('combobox', { name: '选择要补齐的基金' }),
+      '002891',
+    )
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: '选择日常数据回看范围' }),
+      '30',
+    )
+    await user.click(screen.getByRole('button', { name: '补历史净值' }))
+
+    expect(await screen.findByText(/任务 #14：已排队/)).toBeInTheDocument()
   })
 
   it('archives a covered fund and refreshes preparation and coverage counts', async () => {

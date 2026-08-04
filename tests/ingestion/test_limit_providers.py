@@ -555,6 +555,31 @@ def test_csrc_table_currency_note_overrides_generic_cny_column_label() -> None:
     }
 
 
+def test_csrc_table_selects_requested_share_from_multi_share_notice() -> None:
+    text = """
+    下属分级基金的交易代码 270023 000906 021277 023402。
+    """
+    rows = (
+        ("下属分级基金的交易代码", "270023", "000906", "021277", "023402"),
+        (
+            "下属分级基金的限制申购金额（单位：人民币元）",
+            "200.00",
+            "-",
+            "200.00",
+            "-",
+        ),
+    )
+
+    parsed = limits._table_limits(  # noqa: SLF001
+        rows,
+        text,
+        ("270023",),
+        {"270023": "CNY"},
+    )
+
+    assert parsed["PURCHASE"] == {"270023": (Decimal("200"), "CNY")}
+
+
 def test_csrc_pause_then_restore_notice_changes_state_on_restoration_date() -> None:
     text = """
     关于测试基金暂停及恢复大额申购（定期定额投资）业务的公告

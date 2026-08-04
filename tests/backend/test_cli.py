@@ -95,6 +95,12 @@ def test_project_init_creates_private_and_raw_data_directories(tmp_path: Path) -
     assert ".data/raw" in first.created
     assert ".data/private" in second.preserved
     assert ".data/raw" in second.preserved
+    assert (
+        tmp_path / "config" / "fund-analysis-proxies.local.yaml"
+    ).read_text(encoding="utf-8").startswith("version: 1\n")
+    assert (
+        tmp_path / "config" / "analysis-security-map.local.yaml"
+    ).read_text(encoding="utf-8") == "version: 1\nmappings: []\n"
 
 
 def test_sync_reports_command_wires_provider_pipeline_and_single_fund_filter(

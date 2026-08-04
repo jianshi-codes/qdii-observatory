@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react'
 import { useMemo, useState, type CSSProperties } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router'
 import { api } from '../api/client'
 import type { ComparePayload, FundSummary } from '../api/types'
 import { EChart } from '../components/EChart'

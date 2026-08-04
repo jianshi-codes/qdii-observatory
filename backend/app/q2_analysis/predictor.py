@@ -14,7 +14,8 @@ import yaml
 from backend.app.q2_analysis import MODEL_NAME
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[3]
-DEFAULT_PROXY_PATH: Final = REPOSITORY_ROOT / "config" / "fund-analysis-proxies.yaml"
+PUBLIC_PROXY_PATH: Final = REPOSITORY_ROOT / "config" / "fund-analysis-proxies.yaml"
+LOCAL_PROXY_PATH: Final = REPOSITORY_ROOT / "config" / "fund-analysis-proxies.local.yaml"
 PCT_SCALE: Final = Decimal("0.00000001")
 Confidence = Literal["HIGH", "MEDIUM", "LOW", "LOW_CONFIDENCE"]
 AnalysisMode = Literal["Q2_EX_POST", "Q2_LIVE"]
@@ -295,7 +296,7 @@ def analysis_mode(public_available_at: datetime, nav_date: date) -> AnalysisMode
 
 def load_proxy_config(
     representative_code: str,
-    path: Path = DEFAULT_PROXY_PATH,
+    path: Path | None = None,
 ) -> FundProxyConfig | None:
     document = _load_proxy_document(path)
     funds = document.get("funds")
@@ -336,7 +337,7 @@ def load_proxy_config(
 
 def load_alignment_override(
     representative_code: str,
-    path: Path = DEFAULT_PROXY_PATH,
+    path: Path | None = None,
 ) -> str | None:
     document = _load_proxy_document(path)
     overrides = document.get("alignment_overrides", {})
@@ -346,7 +347,7 @@ def load_alignment_override(
     return _required_text({"value": value}, "value").upper() if value is not None else None
 
 
-def load_consistency_rule_values(path: Path = DEFAULT_PROXY_PATH) -> dict[str, object]:
+def load_consistency_rule_values(path: Path | None = None) -> dict[str, object]:
     document = _load_proxy_document(path)
     rules = document.get("consistency_rules")
     if not isinstance(rules, dict):
@@ -355,11 +356,38 @@ def load_consistency_rule_values(path: Path = DEFAULT_PROXY_PATH) -> dict[str, o
 
 
 @lru_cache(maxsize=8)
-def _load_proxy_document(path: Path) -> dict[str, Any]:
+def _load_proxy_document(path: Path | None) -> dict[str, Any]:
+    if path is not None:
+        return _read_proxy_document(path, require_version=True)
+
+    public = _read_proxy_document(PUBLIC_PROXY_PATH, require_version=True)
+    if not LOCAL_PROXY_PATH.is_file():
+        return public
+    local = _read_proxy_document(LOCAL_PROXY_PATH, require_version=False)
+    return _merge_proxy_documents(public, local)
+
+
+def _read_proxy_document(path: Path, *, require_version: bool) -> dict[str, Any]:
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or document.get("version") != 1:
-        raise ValueError("Proxy config must have version: 1")
+    if not isinstance(document, dict):
+        raise ValueError(f"Proxy config must be an object: {path}")
+    version = document.get("version")
+    if (require_version and version != 1) or (version is not None and version != 1):
+        raise ValueError(f"Proxy config must have version: 1: {path}")
     return document
+
+
+def _merge_proxy_documents(
+    public: dict[str, Any], local: dict[str, Any]
+) -> dict[str, Any]:
+    merged = dict(public)
+    for field in ("funds", "alignment_overrides", "consistency_rules"):
+        base_value = public.get(field, {})
+        local_value = local.get(field, {})
+        if not isinstance(base_value, dict) or not isinstance(local_value, dict):
+            raise ValueError(f"Proxy config field {field} must be an object")
+        merged[field] = {**base_value, **local_value}
+    return merged
 
 
 def _security_contribution(item: HoldingReturnInput) -> Contribution:

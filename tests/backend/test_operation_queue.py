@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,11 @@ def test_durable_operation_is_claimed_and_completed(
             status="succeeded",
             fund_codes=("100055",),
             runs=(run,),
+            recurring_orders_created=2,
+            recurring_orders_settled=1,
+            recurring_executions_written=2,
+            recurring_positions_updated=1,
+            recurring_latest_nav_date=date(2026, 8, 3),
         )
 
     monkeypatch.setattr(
@@ -63,6 +69,11 @@ def test_durable_operation_is_claimed_and_completed(
     assert completed.stage_completed == 1
     assert completed.run_ids
     assert completed.records_written == 5
+    assert completed.recurring_orders_created == 2
+    assert completed.recurring_orders_settled == 1
+    assert completed.recurring_executions_written == 2
+    assert completed.recurring_positions_updated == 1
+    assert completed.recurring_latest_nav_date == date(2026, 8, 3)
 
 
 def test_active_slot_rejects_a_second_operation_and_recovers_restart(

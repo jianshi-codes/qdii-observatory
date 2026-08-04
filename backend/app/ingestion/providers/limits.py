@@ -487,9 +487,11 @@ def _table_limits(
     code_candidates: list[tuple[str, ...]] = []
     for row in rows:
         codes = tuple(
-            compact for cell in row if (compact := _compact_text(cell or "")) in requested
+            compact
+            for cell in row
+            if re.fullmatch(r"\d{6}", compact := _compact_text(cell or ""))
         )
-        if codes:
+        if codes and requested.intersection(codes):
             code_candidates.append(codes)
     if code_candidates:
         codes = max(code_candidates, key=len)
@@ -575,6 +577,8 @@ def _table_limits(
         for index, (share_code, (value, slot_unit)) in enumerate(
             zip(codes, selected_slots, strict=True)
         ):
+            if share_code not in requested:
+                continue
             if value is None:
                 continue
             share_unit = {"CNY": "元", "USD": "美元", "HKD": "港元"}.get(

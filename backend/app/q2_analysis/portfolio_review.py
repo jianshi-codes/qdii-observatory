@@ -982,7 +982,7 @@ def _position_values_cny(
                 "组合权重与组合预计收益未计算。"
             )
             continue
-        units = position.reported_market_value / position.anchor_unit_nav
+        units = position.reported_units
         market_value = units * unit_nav
         if position.currency == "CNY":
             market_value_cny = market_value
@@ -1166,48 +1166,16 @@ def _portfolio_fund_rows(
         quarter_cumulative_predicted = None
         quarter_cumulative_difference = None
         quarter_observation_count = None
-        paired_date_sequences = [
-            tuple(
-                item.nav_date
-                for item in result.predictions
-                if item.actual_return_pct is not None
-                and item.predicted_return_pct is not None
-                and (
-                    comparison_nav_date is None
-                    or item.nav_date <= comparison_nav_date
-                )
+        common_cumulative = (
+            _common_cumulative_points(
+                tuple(result.predictions for result, _ in positive_results),
+                comparison_nav_date,
             )
-            for result, _ in positive_results
-        ]
-        if (
-            comparison_nav_date is not None
-            and paired_date_sequences
-            and paired_date_sequences[0]
-            and all(
-                dates == paired_date_sequences[0]
-                for dates in paired_date_sequences[1:]
-            )
-        ):
-            cumulative_by_result: list[CumulativePoint] = []
-            for result, _ in positive_results:
-                point = next(
-                    (
-                        item
-                        for item in reversed(
-                            cumulative_points(list(result.predictions))
-                        )
-                        if item.nav_date == comparison_nav_date.isoformat()
-                    ),
-                    None,
-                )
-                if (
-                    point is None
-                    or point.cumulative_actual_return_pct is None
-                    or point.cumulative_predicted_return_pct is None
-                ):
-                    cumulative_by_result = []
-                    break
-                cumulative_by_result.append(point)
+            if comparison_nav_date is not None
+            else None
+        )
+        if common_cumulative is not None:
+            cumulative_by_result, common_observation_count = common_cumulative
             if len(cumulative_by_result) == len(positive_results):
                 quarter_cumulative_actual = _q(
                     sum(
@@ -1242,7 +1210,7 @@ def _portfolio_fund_rows(
                 quarter_cumulative_difference = _q(
                     quarter_cumulative_actual - quarter_cumulative_predicted
                 )
-                quarter_observation_count = len(paired_date_sequences[0])
+                quarter_observation_count = common_observation_count
         primary = fund_results[0]
         coverage_pct = min(
             (
@@ -1308,6 +1276,37 @@ def _portfolio_fund_rows(
         )
     )
     return tuple(rows)
+
+
+def _common_cumulative_points(
+    prediction_series: tuple[tuple[DailyPrediction, ...], ...],
+    comparison_nav_date: date,
+) -> tuple[list[CumulativePoint], int] | None:
+    paired_date_sets = [
+        {
+            item.nav_date
+            for item in predictions
+            if item.nav_date <= comparison_nav_date
+            and item.actual_return_pct is not None
+            and item.predicted_return_pct is not None
+        }
+        for predictions in prediction_series
+    ]
+    common_dates = set.intersection(*paired_date_sets) if paired_date_sets else set()
+    if comparison_nav_date not in common_dates:
+        return None
+    points: list[CumulativePoint] = []
+    for predictions in prediction_series:
+        common_predictions = [item for item in predictions if item.nav_date in common_dates]
+        point = next(reversed(cumulative_points(common_predictions)), None)
+        if (
+            point is None
+            or point.cumulative_actual_return_pct is None
+            or point.cumulative_predicted_return_pct is None
+        ):
+            return None
+        points.append(point)
+    return points, len(common_dates)
 
 
 def _weighted_allocations(

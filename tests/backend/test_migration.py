@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 
 from backend.app.config import get_settings
@@ -61,6 +62,7 @@ def test_initial_migration_up_and_down_on_sqlite(tmp_path, monkeypatch) -> None:
     assert artifact_foreign_key["options"].get("ondelete") == "RESTRICT"
     assert {
         "reported_market_value",
+        "reported_units",
         "reported_profit_amount",
         "reported_return_pct",
         "reported_cumulative_profit_amount",
@@ -89,9 +91,43 @@ def test_initial_migration_up_and_down_on_sqlite(tmp_path, monkeypatch) -> None:
         "fund_codes",
         "current_stage",
         "run_ids",
+        "recurring_orders_created",
+        "recurring_orders_settled",
+        "recurring_executions_written",
+        "recurring_positions_updated",
+        "recurring_latest_nav_date",
     } <= {column["name"] for column in inspector.get_columns("data_operation")}
+    assert {
+        "portfolio_position_id",
+        "nav_date",
+        "unit_nav",
+        "gross_amount",
+        "net_amount",
+        "units",
+    } <= {column["name"] for column in inspector.get_columns("portfolio_recurring_execution")}
+    assert {
+        "portfolio_position_id",
+        "order_date",
+        "expected_confirmation_date",
+        "status",
+        "gross_amount",
+        "net_amount",
+        "settled_execution_id",
+        "confirmed_at",
+    } <= {column["name"] for column in inspector.get_columns("portfolio_recurring_order")}
+    assert "recurring_confirmation_lag_days" in {
+        column["name"] for column in inspector.get_columns("portfolio_position")
+    }
 
     command.downgrade(config, "base")
     assert inspect(engine).get_table_names() == ["alembic_version"]
     engine.dispose()
     get_settings.cache_clear()
+
+
+def test_revision_ids_fit_alembic_version_column() -> None:
+    config = Config()
+    config.set_main_option("script_location", "migrations")
+    revisions = ScriptDirectory.from_config(config).walk_revisions()
+
+    assert all(len(revision.revision) <= 32 for revision in revisions)

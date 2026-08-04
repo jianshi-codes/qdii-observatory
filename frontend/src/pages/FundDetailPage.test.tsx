@@ -1,11 +1,24 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FundDetailPage } from './FundDetailPage'
 
 vi.mock('../components/EChart', () => ({
-  EChart: ({ ariaLabel }: { ariaLabel: string }) => <div role="img" aria-label={ariaLabel} />,
+  EChart: ({ ariaLabel, option }: {
+    ariaLabel: string
+    option: { series?: Array<{ type?: string; data?: Array<{ itemStyle?: { color?: string } }> }> }
+  }) => {
+    const series = Array.isArray(option.series) ? option.series : []
+    return (
+      <div
+        role="img"
+        aria-label={ariaLabel}
+        data-series-types={series.map((item) => item.type).join(',')}
+        data-bar-colors={series.flatMap((item) => item.data ?? []).map((item) => item.itemStyle?.color).filter(Boolean).join(',')}
+      />
+    )
+  },
 }))
 
 function response(body: unknown) {
@@ -150,6 +163,9 @@ describe('FundDetailPage purchase-limit panel', () => {
 
     expect(await screen.findByRole('heading', { name: '每日涨跌幅' })).toBeInTheDocument()
     expect(screen.getByText('+1.25%')).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: '基金每日净值涨跌幅百分比时间序列图' })).toBeInTheDocument()
+    expect(screen.getByText(/红涨绿跌/)).toBeInTheDocument()
+    const returnChart = screen.getByRole('img', { name: '基金每日净值涨跌幅百分比时间序列图' })
+    expect(returnChart).toHaveAttribute('data-series-types', 'bar')
+    expect(returnChart).toHaveAttribute('data-bar-colors', '#176b5f,#b1432f')
   })
 })

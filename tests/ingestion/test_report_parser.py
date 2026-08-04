@@ -8,6 +8,7 @@ import pytest
 from backend.app.ingestion.parser import (
     ParsedQuarterlyReport,
     ReportParseError,
+    _append_security,
     _append_unclassified_industry_note,
     _classify_table,
     _explicit_empty_sections,
@@ -66,6 +67,61 @@ def test_security_table_classification_tolerates_interleaved_wide_headers() -> N
     ]
 
     assert _classify_table(table) == "SECURITY"
+
+
+def test_security_table_classification_reads_vertically_split_headers() -> None:
+    table = [
+        ["序", "公司名称(英文)", "公", "证", "所", "所", "数量(股)", "公允价值", "占基金"],
+        ["号", "", "司", "券", "在", "属", "", "（人民币元）", "资产净值"],
+        ["", "", "名", "代", "证", "国", "", "", "比例(%)"],
+        ["", "", "称", "码", "券市场", "家（地区）", "", "", ""],
+        [
+            "1",
+            "MICRON TECHNOLOGY INC",
+            "美光科技",
+            "MU US",
+            "美国证券交易所",
+            "美国",
+            "31,700",
+            "249,217,594.22",
+            "10.64",
+        ],
+    ]
+
+    assert _classify_table(table) == "SECURITY"
+
+
+def test_security_rank_tolerates_wrapped_two_digit_value() -> None:
+    parsed = ParsedQuarterlyReport(
+        fund_name="测试基金",
+        main_code="160644",
+        manager_name="测试基金管理有限公司",
+        period_end=date(2026, 6, 30),
+        benchmark=None,
+        share_codes=("160644",),
+        target_fund_name=None,
+        target_fund_code=None,
+    )
+
+    _append_security(
+        parsed,
+        [
+            "1\n0",
+            "ADVANCED MICRO DEVICES",
+            "-",
+            "AMD US",
+            "美国证券交易所",
+            "美国",
+            "20,920",
+            "82,770,396.71",
+            "3.53",
+        ],
+        11,
+    )
+
+    assert len(parsed.securities) == 1
+    assert parsed.securities[0].rank == 10
+    assert parsed.securities[0].security_code_raw == "AMD US"
 
 
 def test_explicit_empty_detection_joins_wrapped_heading_but_stays_local() -> None:

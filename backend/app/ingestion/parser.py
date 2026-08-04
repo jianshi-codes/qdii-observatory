@@ -8,11 +8,12 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
+from itertools import zip_longest
 from typing import Any, Literal
 
 import pdfplumber
 
-PARSER_VERSION = "quarterly-pdf-semantic-v2"
+PARSER_VERSION = "quarterly-pdf-semantic-v3"
 EXPECTED_PERIOD_END = date(2026, 6, 30)
 PARSE_TOLERANCE_PCT = Decimal("0.20")
 CHINESE = re.compile(r"[\u3400-\u9fff]")
@@ -244,8 +245,21 @@ def _parse_tables(pages: list[Any], parsed: ParsedQuarterlyReport) -> None:
 
 
 def _classify_table(table: list[list[str | None]]) -> TableKind | None:
-    probe = _clean_text(" ".join(_cell(cell) for row in table[:6] for cell in row))
-    compact = re.sub(r"\s+", "", probe)
+    header_rows: list[list[str | None]] = []
+    for row in table[:20]:
+        values = [_cell(cell) for cell in row if _cell(cell)]
+        if values and _integer_or_none(values[0]) is not None:
+            break
+        header_rows.append(row)
+    if not header_rows:
+        return None
+    row_major = " ".join(_cell(cell) for row in header_rows for cell in row)
+    column_major = " ".join(
+        _cell(cell)
+        for column in zip_longest(*header_rows, fillvalue=None)
+        for cell in column
+    )
+    compact = re.sub(r"\s+", "", f"{row_major} {column_major}")
     compact = compact.replace("(", "（").replace(")", "）")
     if "基金名称" in compact and "基金类型" in compact and "管理人" in compact:
         return "FUND"
@@ -262,7 +276,7 @@ def _classify_table(table: list[list[str | None]]) -> TableKind | None:
     if "项目" in compact and "基金总资产" in compact:
         return "ASSET"
     if any(
-        marker in probe
+        marker in compact
         for marker in (
             "债券代码",
             "债券信用等级",
@@ -327,7 +341,7 @@ def _collect_security_rows(
 ) -> list[str] | None:
     for raw in table:
         values = [_cell(cell) for cell in raw if _cell(cell)]
-        if values and values[0].isdigit() and len(values) >= 9:
+        if values and _integer_or_none(values[0]) is not None and len(values) >= 9:
             if pending is not None:
                 _append_security(parsed, pending, page_number)
             pending = values[:9]
@@ -344,9 +358,8 @@ def _collect_security_rows(
 def _append_security(parsed: ParsedQuarterlyReport, values: list[str], page_number: int) -> None:
     if len(values) < 9:
         return
-    try:
-        rank = int(values[0])
-    except ValueError:
+    rank = _integer_or_none(values[0])
+    if rank is None:
         return
     if any(item.rank == rank for item in parsed.securities):
         return
@@ -659,6 +672,11 @@ def _decimal_or_none(value: str) -> Decimal | None:
         return Decimal(compact)
     except InvalidOperation:
         return None
+
+
+def _integer_or_none(value: str) -> int | None:
+    compact = re.sub(r"\s+", "", value)
+    return int(compact) if re.fullmatch(r"[0-9]+", compact) else None
 
 
 def _merge_fragment(value: str, fragment: str, *, numeric: bool) -> str:

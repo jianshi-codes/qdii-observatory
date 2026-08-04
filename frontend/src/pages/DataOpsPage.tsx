@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { api } from '../api/client'
 import type {
   DataOperationName,
@@ -46,6 +46,7 @@ import {
   statusLabel,
   toNumber,
 } from '../lib/format'
+import { currentQuarterHistory } from '../lib/operations'
 
 function isParsed(fund: FundSummary): boolean {
   return ['parsed', 'valid_empty'].includes(String(field(fund, 'latest_report_status', 'report_status', 'q2_report_status')).toLowerCase())
@@ -126,8 +127,8 @@ const limitCapStates = [
 ] as const
 
 const preparationActionHelp: Record<DataOperationName, string> = {
-  prepare: '同步近 10 天净值、场内价格与汇率，获取今日直销和代销限额，再获取最近季度报告并解析持仓、计算穿透。',
-  'sync-daily': '同步近 10 天基金净值；场内基金同时更新交易价格，并更新估值所需汇率。不会下载或解析季度报告。',
+  prepare: '从当前季度首日补齐净值和场内价格，刷新当前限额与汇率，再下载最近季度报告、解析持仓并计算穿透。历史限额无法可靠回补。',
+  'sync-daily': '同步所选范围的基金净值；场内基金同时更新交易价格，并刷新当前限额与估值所需汇率。不会下载或解析季度报告。',
   'sync-sales-limits': '同步今天各基金份额的直销和代销可售状态、金额上限及来源证据。不会更新净值或季度报告。',
   'sync-reports': '查找并下载最近已结束季度的基金报告，保存原始来源文件。不会解析持仓或计算穿透。',
   'parse-reports': '解析已下载报告中的资产、国家、行业、股票和基金持仓，再计算基金持仓穿透。不会重新下载报告。',
@@ -169,10 +170,11 @@ export function DataOpsPage() {
     },
   })
   const operationMutation = useMutation({
-    mutationFn: ({ operation, fundCodes = [] }: {
+    mutationFn: ({ operation, fundCodes = [], lookbackDays = 10 }: {
       operation: DataOperationName
       fundCodes?: string[]
-    }) => api.runDataOperation(operation, fundCodes),
+      lookbackDays?: number
+    }) => api.runDataOperation(operation, fundCodes, lookbackDays, true),
     onSuccess: () => refreshAll(),
   })
   const archiveMutation = useMutation({
@@ -183,10 +185,11 @@ export function DataOpsPage() {
   const funds = fundsQuery.data ?? []
   const persistedOperation = preparationQuery.data?.latest_operation
   const submittedOperation = operationMutation.data
-  const operation = submittedOperation
-    && (!persistedOperation || submittedOperation.id > persistedOperation.id)
-    ? submittedOperation
-    : persistedOperation
+  const operation = !submittedOperation
+    ? persistedOperation
+    : persistedOperation?.id === submittedOperation.id
+      ? persistedOperation
+      : submittedOperation
   const operationBusy = operationMutation.isPending
     || operation?.status === 'queued'
     || operation?.status === 'running'
@@ -231,8 +234,8 @@ export function DataOpsPage() {
     }
   }, [operationId, operationStatus, refreshAll])
 
-  function runOperation(operation: DataOperationName, fundCodes: string[] = []) {
-    operationMutation.mutate({ operation, fundCodes })
+  function runOperation(operation: DataOperationName, fundCodes: string[] = [], lookbackDays = 10) {
+    operationMutation.mutate({ operation, fundCodes, lookbackDays })
   }
 
   function archiveFund(fund: FundSummary) {
@@ -423,7 +426,7 @@ export function DataOpsPage() {
                         className="button button-quiet"
                         disabled={operationBusy || archiveMutation.isPending}
                         help={preparationActionHelp.prepare}
-                        onClick={() => runOperation('prepare', [fund.representative_code])}
+                        onClick={() => runOperation('prepare', [fund.representative_code], currentQuarterHistory().lookbackDays)}
                       >
                         <Play size={14} />补齐数据
                       </PreparationActionButton>
@@ -437,7 +440,7 @@ export function DataOpsPage() {
         )}
         <div className="operation-note">
           <ServerCog size={17} />
-          <p><strong>“补齐数据”只处理这一只已导入基金。</strong> 它会同步近 10 天日常数据、获取最近已结束季度报告并重新解析穿透；所有结果仍记录在 ingestion run 中。</p>
+          <p><strong>“补齐数据”只处理这一只已导入基金。</strong> 它会从当前季度首日补净值和价格，刷新当前限额与汇率，获取最近已结束季度报告并重新解析穿透；历史限额无法可靠回补，所有结果仍记录在 ingestion run 中。</p>
         </div>
       </section>
 
@@ -469,9 +472,11 @@ function DataPreparationPanel({
   operation: DataOperationResult | null | undefined
   operationError: unknown
   onRefresh: () => void
-  onRun: (operation: DataOperationName, fundCodes?: string[]) => void
+  onRun: (operation: DataOperationName, fundCodes?: string[], lookbackDays?: number) => void
 }) {
   const [selectedFundCode, setSelectedFundCode] = useState('')
+  const [historyRange, setHistoryRange] = useState('10')
+  const [dailyLookbackDays, setDailyLookbackDays] = useState(10)
   if (pending) return <section className="panel"><LoadingPanel label="计算基金数据准备状态…" /></section>
   if (error) return <section className="panel"><ErrorPanel error={error} onRetry={onRefresh} /></section>
   if (!status) return null
@@ -479,7 +484,7 @@ function DataPreparationPanel({
   const total = status.total_funds
   const stages = [
     { key: 'funds', label: '基金清单', ready: total, detail: total ? `${status.total_shares} 个份额代码已归并` : '先导入基金' },
-    { key: 'nav', label: '净值与价格', ready: status.nav_ready_funds, detail: status.latest_nav_date ? `最新 ${formatDate(status.latest_nav_date)}` : '尚未同步' },
+    { key: 'nav', label: '净值与价格', ready: status.nav_ready_funds, detail: status.latest_nav_date ? `目标净值日 ${formatDate(status.latest_nav_date)}` : '尚未同步' },
     { key: 'limits', label: '今日申购限额', ready: status.limit_ready_funds, detail: status.latest_limit_snapshot_date ? `快照 ${formatDate(status.latest_limit_snapshot_date)}` : '尚无快照' },
     { key: 'reports', label: `${status.report_year} Q${status.report_quarter} 季报`, ready: status.report_downloaded_funds, detail: '最近已结束季度' },
     { key: 'parsed', label: '报告解析', ready: status.report_parsed_funds, detail: '国家、行业与披露持仓' },
@@ -494,6 +499,9 @@ function DataPreparationPanel({
     'parse-reports': '解析报告并计算穿透',
   }
   const operationActive = operation?.status === 'queued' || operation?.status === 'running'
+  const quarterHistory = currentQuarterHistory()
+  const lookbackDays = Number(historyRange)
+  const historyRangeHelp = `同步所选基金近 ${lookbackDays} 个日历日的净值`
 
   return (
     <section className="panel data-preparation" aria-labelledby="data-preparation-title">
@@ -526,39 +534,79 @@ function DataPreparationPanel({
             <div className="preparation-action-copy">
               <span>刚新增一只基金？</span>
               <strong>只补齐所选基金</strong>
-              <small>无需重跑全部基金；与下方覆盖表中的“补齐数据”作用相同。</small>
+              <small>“补齐全部阶段”按本季度一次性落地；若只缺少近期净值，可单独选择 5、10 或 30 个日历日。</small>
             </div>
             <div className="preparation-single-controls">
               <select aria-label="选择要补齐的基金" value={selectedFundCode} onChange={(event) => setSelectedFundCode(event.target.value)}>
                 <option value="">选择基金…</option>
                 {funds.map((fund) => <option value={fund.representative_code} key={String(fund.id)}>{fund.representative_code} · {fund.canonical_name}</option>)}
               </select>
-              <PreparationActionButton className="button button-primary" disabled={operationBusy || !selectedFundCode} help={preparationActionHelp.prepare} onClick={() => onRun('prepare', [selectedFundCode])}>
-                <Play size={15} />补齐这一只
+              <select aria-label="选择日常数据回看范围" value={historyRange} onChange={(event) => setHistoryRange(event.target.value)}>
+                <option value={5}>近 5 个日历日</option>
+                <option value={10}>近 10 个日历日</option>
+                <option value={30}>近 30 个日历日</option>
+              </select>
+              <PreparationActionButton className="button button-secondary" disabled={operationBusy || !selectedFundCode} help={`${historyRangeHelp}；场内基金同时更新价格，并刷新今日限额和估值所需汇率。不会下载或解析季度报告。手动提交会创建新的同步任务，不复用今日旧任务。`} onClick={() => onRun('sync-daily', [selectedFundCode], lookbackDays)}>
+                <History size={15} />补历史净值
+              </PreparationActionButton>
+              <PreparationActionButton className="button button-primary" disabled={operationBusy || !selectedFundCode} help={`${preparationActionHelp.prepare} 当前季度从 ${formatDate(quarterHistory.startDate)} 开始。`} onClick={() => onRun('prepare', [selectedFundCode], quarterHistory.lookbackDays)}>
+                <Play size={15} />按本季度补齐全部阶段
               </PreparationActionButton>
             </div>
           </div>
           <div className="preparation-action-group preparation-batch-action">
             <div className="preparation-action-copy">
-              <span>全部基金 / 分阶段维护</span>
-              <small>鼠标停留在按钮上可查看具体范围。</small>
+              <span>全部基金 / 按频率维护</span>
+              <strong>每日、本季度与季度报告分开执行</strong>
+              <small>日常更新可以重复；本季度数据按需补齐；季度报告在每个报告期下载和解析一次。</small>
             </div>
-            <div className="preparation-actions">
-              <PreparationActionButton className="button button-primary" disabled={operationBusy} help={preparationActionHelp.prepare} onClick={() => onRun('prepare')}>
-                <Play size={15} />{fullyReady ? `更新全部 ${total} 只基金数据` : `开始准备 ${total} 只基金数据`}
-              </PreparationActionButton>
-              <PreparationActionButton className="button button-secondary" disabled={operationBusy} help={preparationActionHelp['sync-daily']} onClick={() => onRun('sync-daily')}>
-                同步日常数据
-              </PreparationActionButton>
-              <PreparationActionButton className="button button-secondary" disabled={operationBusy} help={preparationActionHelp['sync-sales-limits']} onClick={() => onRun('sync-sales-limits')}>
-                仅同步今日限额
-              </PreparationActionButton>
-              <PreparationActionButton className="button button-secondary" disabled={operationBusy} help={preparationActionHelp['sync-reports']} onClick={() => onRun('sync-reports')}>
-                获取 {status.report_year} Q{status.report_quarter} 报告
-              </PreparationActionButton>
-              <PreparationActionButton className="button button-secondary" disabled={operationBusy || status.report_downloaded_funds === 0} help={preparationActionHelp['parse-reports']} onClick={() => onRun('parse-reports')}>
-                解析报告并计算穿透
-              </PreparationActionButton>
+            <div className="preparation-maintenance-grid">
+              <article className="preparation-maintenance-card">
+                <div className="preparation-maintenance-copy">
+                  <span>DAILY</span>
+                  <strong>每日数据</strong>
+                  <small>净值、场内价格、当前限额和汇率；常规维护选择 5 或 10 个日历日。</small>
+                </div>
+                <div className="preparation-maintenance-actions">
+                  <select aria-label="选择全部基金每日同步范围" value={dailyLookbackDays} onChange={(event) => setDailyLookbackDays(Number(event.target.value))}>
+                    <option value={5}>近 5 个日历日</option>
+                    <option value={10}>近 10 个日历日</option>
+                  </select>
+                  <PreparationActionButton className="button button-primary" disabled={operationBusy} help={`同步全部基金近 ${dailyLookbackDays} 个日历日的净值和场内价格，并刷新当前限额与汇率。`} onClick={() => onRun('sync-daily', [], dailyLookbackDays)}>
+                    同步近 {dailyLookbackDays} 天每日数据
+                  </PreparationActionButton>
+                  <PreparationActionButton className="button button-quiet" disabled={operationBusy} help={preparationActionHelp['sync-sales-limits']} onClick={() => onRun('sync-sales-limits')}>
+                    仅刷新今日限额
+                  </PreparationActionButton>
+                </div>
+              </article>
+              <article className="preparation-maintenance-card">
+                <div className="preparation-maintenance-copy">
+                  <span>QUARTER DATA</span>
+                  <strong>本季度数据</strong>
+                  <small>从 {formatDate(quarterHistory.startDate)} 补净值和价格，同时刷新当前限额与汇率；历史限额不回填。</small>
+                </div>
+                <div className="preparation-maintenance-actions">
+                  <PreparationActionButton className="button button-secondary" disabled={operationBusy} help={`从 ${formatDate(quarterHistory.startDate)} 起同步全部基金净值和场内价格，并刷新当前限额与汇率。`} onClick={() => onRun('sync-daily', [], quarterHistory.lookbackDays)}>
+                    <History size={15} />同步本季度数据
+                  </PreparationActionButton>
+                </div>
+              </article>
+              <article className="preparation-maintenance-card">
+                <div className="preparation-maintenance-copy">
+                  <span>QUARTERLY REPORT</span>
+                  <strong>{status.report_year} Q{status.report_quarter} 季度报告</strong>
+                  <small>同一报告期先下载一次，再解析持仓并计算穿透一次。</small>
+                </div>
+                <div className="preparation-maintenance-actions">
+                  <PreparationActionButton className="button button-secondary" disabled={operationBusy || status.report_downloaded_funds === total} help={preparationActionHelp['sync-reports']} onClick={() => onRun('sync-reports')}>
+                    {status.report_downloaded_funds === total ? '季度报告已下载' : `下载 ${status.report_year} Q${status.report_quarter} 报告`}
+                  </PreparationActionButton>
+                  <PreparationActionButton className="button button-secondary" disabled={operationBusy || status.report_downloaded_funds === 0 || status.report_parsed_funds === total} help={preparationActionHelp['parse-reports']} onClick={() => onRun('parse-reports')}>
+                    {status.report_parsed_funds === total ? '报告已解析并穿透' : '解析报告并计算穿透'}
+                  </PreparationActionButton>
+                </div>
+              </article>
             </div>
           </div>
         </div>
@@ -696,7 +744,7 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
           <div>
             <span className="section-kicker">PUBLIC FUND CATALOG</span>
             <h2 id="catalog-import-title">从公开信息选择基金</h2>
-            <p>基金公司、来源分类、研究口径可单独使用或任意组合；只有勾选的基金代码会写入本地 universe。</p>
+            <p>基金公司、来源分类、研究领域可单独使用或任意组合；只有勾选的基金代码会写入本地 universe。</p>
           </div>
           <Database size={20} />
         </div>
@@ -723,7 +771,7 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
                 </select>
               </label>
               <label>
-                <span>研究口径</span>
+                <span>研究领域</span>
                 <select value={researchScope} onChange={(event) => changeFilter(() => setResearchScope(event.target.value))}>
                   {optionsQuery.data.research_scopes.map((scope) => (
                     <option key={scope.value} value={scope.value}>{scope.label}</option>
@@ -731,13 +779,13 @@ function CatalogImportPanel({ onImported }: { onImported: () => void }) {
                 </select>
               </label>
             </div>
-            <p className="panel-note">{optionsQuery.data.source_notice} “研究口径”按公开基金名称启发式匹配、按份额代码返回，不等于人工归并后的基金合同清单，也不是投资建议。</p>
+            <p className="panel-note">{optionsQuery.data.source_notice} “来源分类”是公开目录原始分类；“研究领域”按公开基金名称与来源分类启发式匹配。导入后基金总览沿用同一规则，但它不等于官方分类或投资建议。</p>
           </>
         )}
-        {!hasCatalogFilter && optionsQuery.isSuccess && <EmptyPanel compact title="请选择至少一个筛选条件" detail="基金公司、来源分类、研究口径均可作为第一个条件，也可以单独查询。" />}
+        {!hasCatalogFilter && optionsQuery.isSuccess && <EmptyPanel compact title="请选择至少一个筛选条件" detail="基金公司、来源分类、研究领域均可作为第一个条件，也可以单独查询。" />}
         {hasCatalogFilter && candidatesQuery.isPending && <LoadingPanel label="读取公开 QDII 清单…" />}
         {candidatesQuery.isError && <ErrorPanel compact error={candidatesQuery.error} onRetry={() => candidatesQuery.refetch()} />}
-        {candidatesQuery.isSuccess && candidates.length === 0 && <EmptyPanel compact title="当前筛选没有基金" detail="可更换来源分类或研究口径；不会用相似基金自动补位。" />}
+        {candidatesQuery.isSuccess && candidates.length === 0 && <EmptyPanel compact title="当前筛选没有基金" detail="可更换来源分类或研究领域；不会用相似基金自动补位。" />}
         {candidatesQuery.isSuccess && candidates.length > 0 && (
           <>
             <div className="catalog-candidate-list">

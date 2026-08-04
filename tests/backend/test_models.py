@@ -335,6 +335,8 @@ def test_metadata_contains_all_domain_tables() -> None:
         "daily_fund_fee",
         "portfolio_position",
         "portfolio_cash_flow",
+        "portfolio_recurring_execution",
+        "portfolio_recurring_order",
         "ingestion_run",
         "data_operation",
         "source_artifact",

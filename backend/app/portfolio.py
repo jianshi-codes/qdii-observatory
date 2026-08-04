@@ -69,6 +69,7 @@ def import_portfolio_payload(
                 f"Portfolio currency {currency} does not match "
                 f"{share_code} currency {share.currency}"
             )
+        units = _decimal(raw.get("units"), "units", positive=True)
         market_value = _decimal(raw.get("market_value"), "market_value", positive=True)
         profit = _decimal(raw.get("holding_profit"), "holding_profit")
         return_pct = _decimal(raw.get("holding_return_pct"), "holding_return_pct")
@@ -87,11 +88,27 @@ def import_portfolio_payload(
                 PortfolioPosition.fund_share_id == share.id,
             )
         )
+        snapshot_changed = row is not None and any(
+            (
+                row.snapshot_date != snapshot_date,
+                row.reported_units != units,
+                row.reported_market_value != market_value,
+                row.reported_profit_amount != profit,
+                row.reported_return_pct != return_pct,
+                row.reported_cumulative_profit_amount != cumulative_profit,
+                row.anchor_nav_date != anchor.nav_date,
+                row.anchor_unit_nav != anchor.unit_nav,
+            )
+        )
         if row is None:
             row = PortfolioPosition(platform=platform, fund_share_id=share.id)
             session.add(row)
+        elif snapshot_changed:
+            row.recurring_executions.clear()
+            row.recurring_orders.clear()
         row.snapshot_date = snapshot_date
         row.currency = currency
+        row.reported_units = units
         row.reported_market_value = market_value
         row.reported_profit_amount = profit
         row.reported_return_pct = return_pct
@@ -102,6 +119,7 @@ def import_portfolio_payload(
         row.recurring_gross_amount = recurring_values[1]
         row.recurring_fee_pct = recurring_values[2]
         row.recurring_net_amount = recurring_values[3]
+        row.recurring_confirmation_lag_days = recurring_values[4]
         row.manual_purchase_fee_pct = purchase_fee
         row.manual_management_fee_pct_annual = _optional_decimal(
             raw.get("management_fee_pct_annual"), "management_fee_pct_annual"
@@ -160,6 +178,7 @@ def import_portfolio_payload(
                 message=f"Portfolio return fields do not reconcile for {share_code}",
                 details={
                     "platform": platform,
+                    "reported_units": str(units),
                     "reported_market_value": str(market_value),
                     "reported_profit_amount": str(profit),
                     "reported_return_pct": str(return_pct),
@@ -184,9 +203,9 @@ def import_portfolio_payload(
 
 def _recurring_values(
     recurring: dict[str, Any] | None,
-) -> tuple[str | None, Decimal | None, Decimal | None, Decimal | None]:
+) -> tuple[str | None, Decimal | None, Decimal | None, Decimal | None, int]:
     if recurring is None:
-        return None, None, None, None
+        return None, None, None, None, 2
     frequency = str(recurring.get("frequency") or "DAILY").strip().upper()
     if frequency != "DAILY":
         raise ValueError("Only DAILY recurring plans are supported")
@@ -204,7 +223,10 @@ def _recurring_values(
         raise ValueError(
             f"recurring net_amount {net} does not match gross/fee calculation {expected_net}"
         )
-    return frequency, gross, fee, net
+    confirmation_lag_days = int(recurring.get("confirmation_lag_days", 2))
+    if confirmation_lag_days < 0 or confirmation_lag_days > 10:
+        raise ValueError("recurring confirmation_lag_days must be between 0 and 10")
+    return frequency, gross, fee, net, confirmation_lag_days
 
 
 def _quality_note(

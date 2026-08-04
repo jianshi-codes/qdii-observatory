@@ -3,9 +3,12 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.app import api as api_module
@@ -26,6 +29,8 @@ from backend.app.models import (
     IngestionRun,
     PortfolioCashFlow,
     PortfolioPosition,
+    PortfolioRecurringExecution,
+    PortfolioRecurringOrder,
     ReportCountryAllocation,
     ReportDerivedMetrics,
     ReportFundHolding,
@@ -453,6 +458,7 @@ def seeded(db_session: Session) -> dict[str, int]:
         platform="测试平台",
         snapshot_date=date(2026, 7, 29),
         currency="CNY",
+        reported_units=Decimal("10000"),
         reported_market_value=Decimal("10000"),
         reported_profit_amount=Decimal("1000"),
         reported_return_pct=Decimal("10"),
@@ -536,6 +542,8 @@ def test_all_fund_read_endpoints(client: TestClient, seeded: dict[str, int]) -> 
     assert summary["lookthrough_status"] == "resolved"
     assert summary["latest_nav_date"] == "2026-07-30"
     assert summary["latest_nav_return_pct"] == "0.75000000"
+    assert summary["research_scope"] == "TECHNOLOGY"
+    assert summary["is_portfolio_held"] is True
     assert summary["korea_country_pct"] == "3.00000000"
     assert summary["japan_country_pct"] == "2.00000000"
     assert summary["hong_kong_country_pct"] == "4.00000000"
@@ -623,7 +631,7 @@ def test_portfolio_uses_latest_nav_without_mixing_fee_deductions(
     assert position["estimated_market_value_cny"] == "10100.00"
     assert position["estimated_profit_amount"] == "1100.00"
     assert position["estimated_profit_amount_cny"] == "1100.00"
-    assert position["estimated_return_pct"] == "11.1000000000"
+    assert position["estimated_return_pct"] == "11.00"
     assert position["estimated_daily_profit_amount"] == "100.00"
     assert position["estimated_daily_profit_amount_cny"] == "100.00"
     assert position["estimated_cumulative_profit_amount"] == "1300.00"
@@ -632,13 +640,140 @@ def test_portfolio_uses_latest_nav_without_mixing_fee_deductions(
     assert position["fees"]["platform_purchase_fee_pct"] == "0.15000000"
     assert position["fees"]["management_fee_pct_annual"] == "1.20000000"
     assert payload["currency_summaries"][0]["estimated_market_value"] == "10100.00"
-    assert payload["currency_summaries"][0]["estimated_return_pct"] == "11.10000000"
+    assert payload["currency_summaries"][0]["estimated_return_pct"] == "11.00000000"
     assert payload["currency_summaries"][0]["estimated_daily_return_pct"] == "1.00000000"
     assert payload["currency_summaries"][0]["recurring_net_pct"] == "99.85000000"
     assert payload["converted_summary"]["estimated_market_value"] == "10100.00"
-    assert payload["converted_summary"]["estimated_return_pct"] == "11.10000000"
+    assert payload["converted_summary"]["estimated_return_pct"] == "11.00000000"
     assert payload["converted_summary"]["estimated_daily_return_pct"] == "1.00000000"
     assert payload["converted_summary"]["usd_cny_rate"] is None
+
+
+def test_portfolio_keeps_platform_snapshot_cost_stable_across_nav_days(
+    client: TestClient, db_session: Session, seeded: dict[str, int]
+) -> None:
+    position = db_session.scalar(select(PortfolioPosition))
+    assert position is not None
+    position.cash_flows.clear()
+    position.reported_market_value = Decimal("10000")
+    position.reported_profit_amount = Decimal("-2000")
+    position.reported_return_pct = Decimal("-17")
+    position.data_quality_note = None
+    db_session.commit()
+
+    item = client.get("/api/portfolio").json()["positions"][0]
+
+    assert item["estimated_market_value"] == "10100.00"
+    assert item["estimated_profit_amount"] == "-1900.00"
+    assert Decimal(item["estimated_return_pct"]).quantize(Decimal("0.01")) == Decimal("-16.15")
+
+
+def test_portfolio_preserves_platform_market_snapshot_as_nav_baseline(
+    client: TestClient, db_session: Session, seeded: dict[str, int]
+) -> None:
+    position = db_session.scalar(select(PortfolioPosition))
+    assert position is not None
+    position.reported_market_value = Decimal("11000")
+    position.reported_profit_amount = Decimal("1000")
+    position.reported_return_pct = Decimal("10")
+    db_session.commit()
+
+    item = client.get("/api/portfolio").json()["positions"][0]
+
+    assert item["estimated_market_value"] == "11100.00"
+    assert item["estimated_profit_amount"] == "1100.00"
+    assert item["estimated_return_pct"] == "11.00"
+    assert item["change_since_snapshot"] == "100.00"
+
+
+def test_portfolio_applies_settled_recurring_units_and_cost_once(
+    client: TestClient, db_session: Session, seeded: dict[str, int]
+) -> None:
+    position = db_session.scalar(select(PortfolioPosition))
+    assert position is not None
+    execution = PortfolioRecurringExecution(
+        portfolio_position_id=position.id,
+        nav_date=date(2026, 7, 30),
+        unit_nav=Decimal("1.01"),
+        gross_amount=Decimal("100"),
+        fee_pct=Decimal("0.15"),
+        net_amount=Decimal("99.85"),
+        units=Decimal("98.86138614"),
+        source_provider="FIXTURE",
+    )
+    db_session.add(execution)
+    db_session.flush()
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    db_session.add(
+        PortfolioRecurringOrder(
+            portfolio_position_id=position.id,
+            order_date=today,
+            expected_confirmation_date=today,
+            status="SETTLED",
+            gross_amount=Decimal("100"),
+            fee_pct=Decimal("0.15"),
+            net_amount=Decimal("99.85"),
+            settled_execution_id=execution.id,
+            confirmed_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+
+    payload = client.get("/api/portfolio").json()
+    item = payload["positions"][0]
+
+    assert item["representative_code"] == "000834"
+    assert item["estimated_units"] == "10098.86138614"
+    assert item["estimated_market_value"] == "10199.85"
+    assert item["estimated_profit_amount"] == "1099.85"
+    assert item["estimated_daily_profit_amount"] == "100.00"
+    assert item["recurring_execution_count"] == 1
+    assert item["recurring_invested_gross_amount"] == "100.00"
+    assert item["recurring_invested_net_amount"] == "99.85"
+    assert item["last_recurring_nav_date"] == "2026-07-30"
+    assert item["recurring_pending_order_count"] == 0
+    assert item["latest_recurring_order"]["status"] == "SETTLED"
+    assert item["latest_recurring_order"]["settled_nav_date"] == "2026-07-30"
+    assert payload["currency_summaries"][0]["recurring_execution_count"] == 1
+
+
+def test_portfolio_exposes_pending_recurring_order_without_adding_principal(
+    client: TestClient, db_session: Session, seeded: dict[str, int]
+) -> None:
+    position = db_session.scalar(select(PortfolioPosition))
+    assert position is not None
+    db_session.add(
+        PortfolioRecurringOrder(
+            portfolio_position_id=position.id,
+            order_date=date(2026, 8, 3),
+            expected_confirmation_date=date(2026, 8, 5),
+            status="PENDING",
+            gross_amount=Decimal("100"),
+            fee_pct=Decimal("0.15"),
+            net_amount=Decimal("99.85"),
+        )
+    )
+    db_session.commit()
+
+    payload = client.get("/api/portfolio").json()
+    item = payload["positions"][0]
+
+    assert item["estimated_market_value"] == "10100.00"
+    assert item["recurring_execution_count"] == 0
+    assert item["recurring_invested_gross_amount"] == "0.00"
+    assert item["recurring_pending_order_count"] == 1
+    assert item["recurring_pending_gross_amount"] == "100.00"
+    assert item["latest_recurring_order"] == {
+        "status": "PENDING",
+        "order_date": "2026-08-03",
+        "expected_confirmation_date": "2026-08-05",
+        "gross_amount": "100.000000",
+        "net_amount": "99.850000",
+        "settled_nav_date": None,
+        "confirmed_at": None,
+    }
+    assert payload["currency_summaries"][0]["recurring_execution_count"] == 0
+    assert payload["currency_summaries"][0]["recurring_pending_order_count"] == 1
 
 
 def test_portfolio_converts_usd_positions_with_latest_source_backed_rate(
@@ -679,6 +814,7 @@ def test_portfolio_converts_usd_positions_with_latest_source_backed_rate(
                 platform="测试平台",
                 snapshot_date=date(2026, 7, 29),
                 currency="USD",
+                reported_units=Decimal("100"),
                 reported_market_value=Decimal("100"),
                 reported_profit_amount=Decimal("10"),
                 reported_return_pct=Decimal("10"),
@@ -724,7 +860,7 @@ def test_portfolio_converts_usd_positions_with_latest_source_backed_rate(
         "currency": "CNY",
         "estimated_market_value": "10870.00",
         "estimated_profit_amount": "1240.00",
-        "estimated_return_pct": "11.72402044",
+            "estimated_return_pct": "11.58878505",
         "estimated_daily_profit_amount": "170.00",
         "estimated_daily_return_pct": "1.58878505",
         "usd_cny_rate": "7.000000000000",
@@ -877,6 +1013,7 @@ def test_data_preparation_status_reports_each_ready_stage(
     assert payload == {
         "active_operation": None,
         "latest_operation": None,
+        "latest_daily_operation": None,
         "total_funds": 2,
         "total_shares": 2,
         "nav_ready_funds": 2,
@@ -889,6 +1026,27 @@ def test_data_preparation_status_reports_each_ready_stage(
         "report_parsed_funds": 2,
         "lookthrough_ready_funds": 2,
     }
+
+
+def test_data_preparation_nav_count_requires_every_share_on_latest_date(
+    client: TestClient,
+    db_session: Session,
+    seeded: dict[str, int],
+) -> None:
+    stale_latest = db_session.scalar(
+        select(DailyFundNav).where(
+            DailyFundNav.fund_share_id == seeded["target_share"],
+            DailyFundNav.nav_date == date(2026, 7, 30),
+        )
+    )
+    assert stale_latest is not None
+    db_session.delete(stale_latest)
+    db_session.commit()
+
+    payload = client.get("/api/operations/preparation-status").json()
+
+    assert payload["latest_nav_date"] == "2026-07-30"
+    assert payload["nav_ready_funds"] == 1
 
 
 def test_prepare_operation_is_explicit_scoped_and_queued(
@@ -914,6 +1072,152 @@ def test_prepare_operation_is_explicit_scoped_and_queued(
     queued = db_session.get(DataOperation, payload["id"])
     assert queued is not None
     assert queued.active_slot == 1
+
+
+def test_daily_operation_reuses_same_successful_scope_on_same_day(
+    client: TestClient,
+    db_session: Session,
+    seeded: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(api_module, "raw_data_dir", lambda: tmp_path)
+    position = db_session.scalar(select(PortfolioPosition))
+    assert position is not None
+    execution = PortfolioRecurringExecution(
+        portfolio_position_id=position.id,
+        nav_date=date(2026, 7, 30),
+        unit_nav=Decimal("1.01"),
+        gross_amount=Decimal("100"),
+        fee_pct=Decimal("0.15"),
+        net_amount=Decimal("99.85"),
+        units=Decimal("98.86138614"),
+        source_provider="FIXTURE",
+    )
+    db_session.add(execution)
+    db_session.flush()
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    db_session.add(
+        PortfolioRecurringOrder(
+            portfolio_position_id=position.id,
+            order_date=today,
+            expected_confirmation_date=today,
+            status="SETTLED",
+            gross_amount=Decimal("100"),
+            fee_pct=Decimal("0.15"),
+            net_amount=Decimal("99.85"),
+            settled_execution_id=execution.id,
+            confirmed_at=datetime.now(UTC),
+        )
+    )
+    completed = DataOperation(
+        operation="sync-daily",
+        status="succeeded",
+        active_slot=None,
+        fund_codes=["000834"],
+        lookback_days=10,
+        report_year=2026,
+        report_quarter=2,
+        current_stage=None,
+        stage_completed=1,
+        stage_total=1,
+        run_ids=[],
+        finished_at=datetime.now(UTC),
+    )
+    db_session.add(completed)
+    db_session.commit()
+
+    response = client.post(
+        "/api/operations/sync-daily",
+        json={"fund_codes": ["000834"], "lookback_days": 10},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["id"] == completed.id
+    assert db_session.scalar(select(func.count(DataOperation.id))) == 1
+
+
+def test_daily_operation_queues_larger_same_day_lookback(
+    client: TestClient,
+    db_session: Session,
+    seeded: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(api_module, "raw_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        api_module,
+        "recurring_plans_pending",
+        lambda session, *, fund_codes: False,
+    )
+    completed = DataOperation(
+        operation="sync-daily",
+        status="succeeded",
+        active_slot=None,
+        fund_codes=["000834"],
+        lookback_days=10,
+        report_year=2026,
+        report_quarter=2,
+        current_stage=None,
+        stage_completed=1,
+        stage_total=1,
+        run_ids=[],
+        finished_at=datetime.now(UTC),
+    )
+    db_session.add(completed)
+    db_session.commit()
+
+    response = client.post(
+        "/api/operations/sync-daily",
+        json={"fund_codes": ["000834"], "lookback_days": 100},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["id"] != completed.id
+    assert response.json()["status"] == "queued"
+    assert response.json()["lookback_days"] == 100
+    assert db_session.scalar(select(func.count(DataOperation.id))) == 2
+
+
+def test_daily_operation_force_queues_same_successful_scope_again(
+    client: TestClient,
+    db_session: Session,
+    seeded: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(api_module, "raw_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        api_module,
+        "recurring_plans_pending",
+        lambda session, *, fund_codes: False,
+    )
+    completed = DataOperation(
+        operation="sync-daily",
+        status="succeeded",
+        active_slot=None,
+        fund_codes=["000834"],
+        lookback_days=30,
+        report_year=2026,
+        report_quarter=2,
+        current_stage=None,
+        stage_completed=1,
+        stage_total=1,
+        run_ids=[],
+        finished_at=datetime.now(UTC),
+    )
+    db_session.add(completed)
+    db_session.commit()
+
+    response = client.post(
+        "/api/operations/sync-daily",
+        json={"fund_codes": ["000834"], "lookback_days": 30, "force": True},
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["id"] != completed.id
+    assert response.json()["status"] == "queued"
+    assert db_session.scalar(select(func.count(DataOperation.id))) == 2
 
 
 def test_archive_fund_preserves_data_and_updates_active_universe_counts(
@@ -953,6 +1257,131 @@ def test_today_estimate_is_not_applicable_to_exchange_traded_funds(
     payload = response.json()
     assert payload["prediction"] is None
     assert payload["consistency"]["status"] == "NOT_APPLICABLE"
+
+
+def test_manual_portfolio_create_and_update_recalculate_from_user_snapshot(
+    client: TestClient,
+    db_session: Session,
+    seeded: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(api_module, "raw_data_dir", lambda: tmp_path)
+    create = client.post(
+        "/api/portfolio/positions",
+        json={
+            "share_code": "000834",
+            "platform": "测试平台",
+            "snapshot_date": "2026-07-30",
+            "units": "1000",
+            "market_value": "1000",
+            "holding_profit": "100",
+            "holding_return_pct": "10",
+            "cumulative_profit": "120",
+            "recurring_plan": {"gross_amount": "50", "fee_pct": "0.2"},
+            "purchase_fee_pct": "0.2",
+            "management_fee_pct_annual": None,
+            "custody_fee_pct_annual": None,
+        },
+    )
+
+    assert create.status_code == 200, create.text
+    position = db_session.scalar(select(PortfolioPosition))
+    assert position is not None
+    assert position.reported_market_value == Decimal("1000.000000")
+    assert position.recurring_net_amount == Decimal("49.900000")
+    portfolio = client.get("/api/portfolio").json()
+    assert portfolio["positions"][0]["latest_daily_return_pct"] == "0.75000000"
+    assert portfolio["positions"][0]["manual_purchase_fee_pct"] == "0.20000000"
+
+    update = client.post(
+        f"/api/portfolio/positions/{position.id}",
+        json={
+            "snapshot_date": "2026-07-30",
+            "units": "1200",
+            "market_value": "1200",
+            "holding_profit": "150",
+            "holding_return_pct": "14.2857",
+            "cumulative_profit": None,
+            "recurring_plan": None,
+            "purchase_fee_pct": None,
+            "management_fee_pct_annual": "1.2",
+            "custody_fee_pct_annual": "0.2",
+        },
+    )
+
+    assert update.status_code == 200, update.text
+    db_session.refresh(position)
+    assert position.reported_units == Decimal("1200.00000000")
+    assert position.reported_market_value == Decimal("1200.000000")
+    assert position.recurring_frequency is None
+    assert position.manual_management_fee_pct_annual == Decimal("1.20000000")
+    refreshed = client.get("/api/portfolio").json()["positions"][0]
+    assert refreshed["estimated_market_value"] == "1200.00"
+    assert refreshed["estimated_daily_profit_amount"] == "12.00"
+    assert refreshed["latest_daily_return_pct"] == "0.75000000"
+
+
+def test_portfolio_consistency_endpoint_returns_report_period_analysis(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "data_as_of": date(2026, 8, 1),
+        "market_data_fetched_at": datetime(2026, 8, 3, tzinfo=UTC),
+        "analysis_start_date": date(2026, 7, 1),
+        "as_of": date(2026, 8, 3),
+        "portfolio_prediction": {
+            "predicted_return_pct": Decimal("0.8"),
+            "lower_bound_pct": Decimal("0.2"),
+            "upper_bound_pct": Decimal("1.4"),
+            "analyzed_portfolio_weight_pct": Decimal("82.5"),
+        },
+        "funds": [
+            {
+                "fund_id": 1,
+                "representative_code": "000834",
+                "fund_name": "测试主动基金",
+                "share_codes": ["000834"],
+                "report_period_end": date(2026, 6, 30),
+                "report_public_available_at": datetime(2026, 7, 20, tzinfo=UTC),
+                "portfolio_weight_pct": Decimal("82.5"),
+                "prediction_date": date(2026, 8, 3),
+                "prediction_nav_date": date(2026, 7, 31),
+                "predicted_return_pct": Decimal("0.8"),
+                "comparison_date": None,
+                "comparison_nav_date": None,
+                "comparison_analysis_mode": None,
+                "comparison_predicted_return_pct": None,
+                "actual_return_pct": None,
+                "actual_minus_predicted_pct": None,
+                "quarter_cumulative_through_date": None,
+                "quarter_cumulative_through_nav_date": None,
+                "quarter_cumulative_actual_return_pct": None,
+                "quarter_cumulative_predicted_return_pct": None,
+                "quarter_cumulative_actual_minus_predicted_pct": None,
+                "quarter_cumulative_observation_count": None,
+                "status": "INSUFFICIENT_DATA",
+                "coverage_pct": Decimal("65"),
+            }
+        ],
+        "country_exposure": [],
+        "industry_exposure": [],
+        "overlaps": [],
+        "limitations": ["静态披露不代表当前持仓"],
+        "sources": [],
+    }
+    monkeypatch.setattr(
+        api_module,
+        "_run_portfolio_consistency_analysis",
+        lambda *args, **kwargs: SimpleNamespace(as_dict=lambda: payload),
+    )
+
+    response = client.get("/api/portfolio/consistency?as_of=2026-08-03")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["funds"][0]["report_period_end"] == "2026-06-30"
+    assert response.json()["portfolio_prediction"]["predicted_return_pct"] == "0.8"
 
 
 def test_today_estimate_runs_only_for_one_explicit_direct_fund(
@@ -1068,9 +1497,7 @@ def test_today_estimate_runs_only_for_one_explicit_direct_fund(
 
     monkeypatch.setattr(api_module, "analyze_fund", fake_analyze)
 
-    response = client.get(
-        f"/api/funds/{fund.id}/today-estimate?share_code=000834&as_of=2026-08-03"
-    )
+    response = client.get(f"/api/funds/{fund.id}/today-estimate?share_code=000834&as_of=2026-08-03")
 
     assert response.status_code == 200
     assert response.json()["prediction"]["predicted_return_pct"] == "0.8"

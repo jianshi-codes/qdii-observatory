@@ -19,6 +19,7 @@ export interface FundSummary {
   manager_name: string
   representative_code: string
   original_category?: string | null
+  research_scope?: string | null
   strategy_type?: string | null
   tech_scope?: string | null
   wrapper_type?: string | null
@@ -44,6 +45,7 @@ export interface FundSummary {
   distribution_purchase_limit?: PurchaseLimitSummary | null
   is_dependency?: boolean
   is_user_selected?: boolean
+  is_portfolio_held?: boolean
   [key: string]: unknown
 }
 
@@ -279,6 +281,17 @@ export interface PortfolioRecurringPlan {
   fee_pct: number | string
   net_amount: number | string
   currency: string
+  confirmation_lag_days: number
+}
+
+export interface PortfolioRecurringOrder {
+  status: 'PENDING' | 'SETTLED'
+  order_date: string
+  expected_confirmation_date: string
+  gross_amount: number | string
+  net_amount: number | string
+  settled_nav_date: string | null
+  confirmed_at: string | null
 }
 
 export interface PortfolioFee {
@@ -299,10 +312,12 @@ export interface PortfolioPosition {
   fund_id: Identifier
   canonical_name: string
   manager_name: string
+  representative_code: string
   share_code: string
   platform: string
   currency: string
   snapshot_date: string
+  reported_units: number | string
   reported_market_value: number | string
   reported_profit_amount: number | string
   reported_return_pct: number | string
@@ -325,6 +340,16 @@ export interface PortfolioPosition {
   cash_dividend_total: number | string
   cash_flows: PortfolioCashFlow[]
   recurring_plan: PortfolioRecurringPlan | null
+  recurring_execution_count: number
+  recurring_invested_gross_amount: number | string
+  recurring_invested_net_amount: number | string
+  last_recurring_nav_date: string | null
+  recurring_pending_order_count: number
+  recurring_pending_gross_amount: number | string
+  latest_recurring_order: PortfolioRecurringOrder | null
+  manual_purchase_fee_pct: number | string | null
+  manual_management_fee_pct_annual: number | string | null
+  manual_custody_fee_pct_annual: number | string | null
   fees: PortfolioFee
   data_quality_note: string | null
 }
@@ -340,6 +365,11 @@ export interface PortfolioCurrencySummary {
   recurring_gross_amount: number | string
   recurring_net_amount: number | string
   recurring_net_pct: number | string | null
+  recurring_execution_count: number
+  recurring_invested_gross_amount: number | string
+  recurring_invested_net_amount: number | string
+  recurring_pending_order_count: number
+  recurring_pending_gross_amount: number | string
 }
 
 export interface PortfolioPayload {
@@ -380,6 +410,7 @@ export interface PortfolioImportPositionPreview {
   platform: string
   snapshot_date: string
   currency: string
+  units: number | string
   market_value: number | string
   holding_profit: number | string
   holding_return_pct: number | string
@@ -410,6 +441,100 @@ export interface PortfolioImportResult {
   universe_added: string[]
   universe_restored: string[]
   nav_synced: string[]
+}
+
+export interface PortfolioEditableInput {
+  snapshot_date: string
+  units: number | string
+  market_value: number | string
+  holding_profit: number | string
+  holding_return_pct: number | string
+  cumulative_profit: number | string | null
+  recurring_plan: {
+    gross_amount: number | string
+    fee_pct: number | string
+    confirmation_lag_days: number
+  } | null
+  purchase_fee_pct: number | string | null
+  management_fee_pct_annual: number | string | null
+  custody_fee_pct_annual: number | string | null
+}
+
+export interface PortfolioPositionCreateInput extends PortfolioEditableInput {
+  share_code: string
+  platform: string
+}
+
+export type PortfolioConsistencyStatus =
+  | 'CONSISTENT'
+  | 'SLIGHTLY_DIVERGING'
+  | 'LIKELY_EXPOSURE_CHANGED'
+  | 'INSUFFICIENT_DATA'
+  | 'NOT_APPLICABLE'
+
+export interface PortfolioConsistencyFund {
+  fund_id: Identifier
+  representative_code: string
+  fund_name: string
+  share_codes: string[]
+  report_period_end: string
+  report_public_available_at: string
+  portfolio_weight_pct: number | string
+  prediction_date: string | null
+  prediction_nav_date: string | null
+  predicted_return_pct: number | string | null
+  comparison_date: string | null
+  comparison_nav_date: string | null
+  comparison_analysis_mode: Q2AnalysisMode | null
+  comparison_predicted_return_pct: number | string | null
+  actual_return_pct: number | string | null
+  actual_minus_predicted_pct: number | string | null
+  quarter_cumulative_through_date: string | null
+  quarter_cumulative_through_nav_date: string | null
+  quarter_cumulative_actual_return_pct: number | string | null
+  quarter_cumulative_predicted_return_pct: number | string | null
+  quarter_cumulative_actual_minus_predicted_pct: number | string | null
+  quarter_cumulative_observation_count: number | null
+  status: PortfolioConsistencyStatus
+  coverage_pct: number | string | null
+}
+
+export interface PortfolioConsistencyPayload {
+  data_as_of: string
+  market_data_fetched_at: string | null
+  analysis_start_date: string
+  as_of: string
+  portfolio_prediction: {
+    predicted_return_pct: number | string | null
+    lower_bound_pct: number | string | null
+    upper_bound_pct: number | string | null
+    analyzed_portfolio_weight_pct: number | string | null
+  }
+  funds: PortfolioConsistencyFund[]
+  country_exposure: Array<{ name: string; portfolio_exposure_pct: number | string }>
+  industry_exposure: Array<{ name: string; portfolio_exposure_pct: number | string }>
+  overlaps: Array<{
+    left_fund_id: Identifier
+    left_fund_name: string
+    right_fund_id: Identifier
+    right_fund_name: string
+    overlap_weight_pct: number | string
+    securities: Array<{
+      symbol: string
+      security_name: string
+      left_weight_pct: number | string
+      right_weight_pct: number | string
+      overlap_weight_pct: number | string
+    }>
+  }>
+  limitations: string[]
+  sources: Array<{
+    source_type: string
+    provider: string
+    url: string | null
+    data_date: string | null
+    fetched_at: string | null
+  }>
 }
 
 export interface FundRelation {
@@ -467,6 +592,11 @@ export interface DataOperationResult {
   run_ids: number[]
   records_written: number
   records_failed: number
+  recurring_orders_created: number
+  recurring_orders_settled: number
+  recurring_executions_written: number
+  recurring_positions_updated: number
+  recurring_latest_nav_date: string | null
   created_at: string
   started_at: string | null
   finished_at: string | null
@@ -476,6 +606,7 @@ export interface DataOperationResult {
 export interface DataPreparationStatus {
   active_operation: DataOperationName | null
   latest_operation: DataOperationResult | null
+  latest_daily_operation: DataOperationResult | null
   total_funds: number
   total_shares: number
   nav_ready_funds: number

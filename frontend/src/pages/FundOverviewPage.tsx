@@ -15,7 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router'
 import { api } from '../api/client'
 import type { FundSummary, PurchaseLimitSummary } from '../api/types'
 import { OnDemandEstimateCell } from '../components/OnDemandEstimateCell'
@@ -27,6 +27,7 @@ import {
   formatDate,
   formatMoney,
   formatPercent,
+  researchScopeLabel,
   statusLabel,
   techScopeLabel,
   toNumber,
@@ -54,6 +55,17 @@ type ColumnKey =
 type SortKey = Exclude<ColumnKey, 'tech_scope' | 'latest_estimated_return_pct' | 'latest_report_status' | 'latest_nav_date'>
 type SortDirection = 'asc' | 'desc'
 
+const ALL_HOLDING_STATES = 'ALL'
+const HELD_FUNDS = 'HELD'
+const ALL_RESEARCH_SCOPES = 'ALL'
+const ALL_TECH_SCOPES = 'ALL'
+const GLOBAL_ACTIVE_ALL = 'GLOBAL_ACTIVE_ALL'
+const GLOBAL_ACTIVE_SCOPES = new Set([
+  'GLOBAL_ACTIVE_TECH_HIGH',
+  'GLOBAL_ACTIVE_TECH_MIXED',
+  'GLOBAL_ACTIVE_BROAD',
+])
+
 const columns: Array<{ key: ColumnKey; label: string }> = [
   { key: 'tech_scope', label: '科技口径' },
   { key: 'equity_nav_pct', label: '股票仓位' },
@@ -61,8 +73,8 @@ const columns: Array<{ key: ColumnKey; label: string }> = [
   { key: 'us_country_pct', label: '美国' },
   { key: 'korea_country_pct', label: '韩国' },
   { key: 'japan_country_pct', label: '日本' },
-  { key: 'hong_kong_country_pct', label: '香港' },
-  { key: 'china_country_pct', label: '中国大陆' },
+  { key: 'hong_kong_country_pct', label: '中国香港' },
+  { key: 'china_country_pct', label: '中国内地' },
   { key: 'information_technology_pct', label: '信息技术' },
   { key: 'disclosed_top10_pct', label: '前十大' },
   { key: 'latest_estimated_return_pct', label: '最新预估涨幅' },
@@ -86,6 +98,20 @@ const defaultVisibleColumns = new Set<ColumnKey>(
 
 function fundId(fund: FundSummary): string {
   return String(fund.id ?? fund.representative_code)
+}
+
+function fundTechScope(fund: FundSummary): string {
+  const value = field(fund, 'tech_scope')
+  return typeof value === 'string' ? value : ''
+}
+
+function matchesTechScope(fund: FundSummary, selectedScope: string): boolean {
+  if (selectedScope === ALL_TECH_SCOPES) return true
+  const scope = fundTechScope(fund)
+  if (selectedScope === GLOBAL_ACTIVE_ALL) {
+    return GLOBAL_ACTIVE_SCOPES.has(scope)
+  }
+  return scope === selectedScope
 }
 
 function signedPercent(value: unknown): string {
@@ -168,7 +194,10 @@ export function FundOverviewPage() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [manager, setManager] = useState('全部基金公司')
-  const [category, setCategory] = useState('全部原分类')
+  const [category, setCategory] = useState('全部来源分类')
+  const [holdingState, setHoldingState] = useState(ALL_HOLDING_STATES)
+  const [researchScope, setResearchScope] = useState(ALL_RESEARCH_SCOPES)
+  const [techScope, setTechScope] = useState(ALL_TECH_SCOPES)
   const [selected, setSelected] = useState<string[]>([])
   const [visibleColumns, setVisibleColumns] = useState(defaultVisibleColumns)
   const [sort, setSort] = useState<{ key: SortKey | null; direction: SortDirection }>({
@@ -196,6 +225,16 @@ export function FundOverviewPage() {
     () => [...new Set(funds.map((fund) => fund.original_category).filter((value): value is string => Boolean(value)))].sort(),
     [funds],
   )
+  const researchScopes = useMemo(
+    () => [...new Set(funds.map((fund) => fund.research_scope).filter((value): value is string => Boolean(value)))]
+      .sort((left, right) => researchScopeLabel(left).localeCompare(researchScopeLabel(right), 'zh-CN')),
+    [funds],
+  )
+  const techScopes = useMemo(
+    () => [...new Set(funds.map(fundTechScope).filter(Boolean))]
+      .sort((left, right) => techScopeLabel(left).localeCompare(techScopeLabel(right), 'zh-CN')),
+    [funds],
+  )
   const filteredFunds = useMemo(() => {
     const term = search.trim().toLowerCase()
     const matches = funds.filter((fund) => {
@@ -203,7 +242,10 @@ export function FundOverviewPage() {
         .some((value) => String(value ?? '').toLowerCase().includes(term))
       return matchesSearch
         && (manager === '全部基金公司' || fund.manager_name === manager)
-        && (category === '全部原分类' || fund.original_category === category)
+        && (category === '全部来源分类' || fund.original_category === category)
+        && (holdingState === ALL_HOLDING_STATES || fund.is_portfolio_held === true)
+        && (researchScope === ALL_RESEARCH_SCOPES || fund.research_scope === researchScope)
+        && matchesTechScope(fund, techScope)
     })
     if (!sort.key) return matches
     return [...matches].sort((left, right) => {
@@ -215,7 +257,7 @@ export function FundOverviewPage() {
       const difference = leftValue - rightValue
       return sort.direction === 'asc' ? difference : -difference
     })
-  }, [category, funds, manager, search, sort])
+  }, [category, funds, holdingState, manager, researchScope, search, sort, techScope])
 
   const parsedReports = funds.filter((fund) => String(field(fund, 'latest_report_status', 'report_status', 'q2_report_status')).toLowerCase() === 'parsed').length
   const latestNav = funds
@@ -295,10 +337,17 @@ export function FundOverviewPage() {
           </div>
         </div>
 
-        <div className="filter-bar">
+        <div className="filter-bar fund-filter-bar">
           <label className="search-field">
             <Search size={17} /><span className="sr-only">搜索基金</span>
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索名称、代码或基金公司" />
+          </label>
+          <label className="select-field">
+            <span className="sr-only">按持仓状态筛选</span>
+            <select aria-label="按持仓状态筛选" value={holdingState} onChange={(event) => setHoldingState(event.target.value)}>
+              <option value={ALL_HOLDING_STATES}>全部持仓状态</option>
+              <option value={HELD_FUNDS}>只看持仓基金</option>
+            </select><ChevronDown size={15} />
           </label>
           <label className="select-field">
             <span className="sr-only">筛选基金公司</span>
@@ -307,9 +356,28 @@ export function FundOverviewPage() {
             </select><ChevronDown size={15} />
           </label>
           <label className="select-field">
-            <span className="sr-only">筛选原分类</span>
+            <span className="sr-only">按来源分类筛选</span>
             <select value={category} onChange={(event) => setCategory(event.target.value)}>
-              <option>全部原分类</option>{categories.map((item) => <option key={item}>{item}</option>)}
+              <option>全部来源分类</option>{categories.map((item) => <option key={item}>{item}</option>)}
+            </select><ChevronDown size={15} />
+          </label>
+          <label className="select-field">
+            <span className="sr-only">按研究领域筛选</span>
+            <select aria-label="按研究领域筛选" value={researchScope} onChange={(event) => setResearchScope(event.target.value)}>
+              <option value={ALL_RESEARCH_SCOPES}>全部研究领域</option>
+              {researchScopes.map((scope) => (
+                <option key={scope} value={scope}>{researchScopeLabel(scope)}</option>
+              ))}
+            </select><ChevronDown size={15} />
+          </label>
+          <label className="select-field">
+            <span className="sr-only">按科技细分口径筛选</span>
+            <select aria-label="按科技细分口径筛选" value={techScope} onChange={(event) => setTechScope(event.target.value)}>
+              <option value={ALL_TECH_SCOPES}>全部科技细分口径</option>
+              <option value={GLOBAL_ACTIVE_ALL}>全球主动（3 种口径）</option>
+              {techScopes.map((scope) => (
+                <option key={scope} value={scope}>{techScopeLabel(scope)}</option>
+              ))}
             </select><ChevronDown size={15} />
           </label>
           <details className="column-picker">
@@ -344,8 +412,8 @@ export function FundOverviewPage() {
                   {visible('us_country_pct') && <SortableHeader columnKey="us_country_pct" label="美国" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('korea_country_pct') && <SortableHeader columnKey="korea_country_pct" label="韩国" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('japan_country_pct') && <SortableHeader columnKey="japan_country_pct" label="日本" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
-                  {visible('hong_kong_country_pct') && <SortableHeader columnKey="hong_kong_country_pct" label="香港" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
-                  {visible('china_country_pct') && <SortableHeader columnKey="china_country_pct" label="中国大陆" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
+                  {visible('hong_kong_country_pct') && <SortableHeader columnKey="hong_kong_country_pct" label="中国香港" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
+                  {visible('china_country_pct') && <SortableHeader columnKey="china_country_pct" label="中国内地" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('information_technology_pct') && <SortableHeader columnKey="information_technology_pct" label="信息技术" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('disclosed_top10_pct') && <SortableHeader columnKey="disclosed_top10_pct" label="前十大" activeKey={sort.key} direction={sort.direction} onSort={toggleSort} />}
                   {visible('latest_estimated_return_pct') && <th>最新预估涨幅</th>}
@@ -363,10 +431,10 @@ export function FundOverviewPage() {
                   const checked = selected.includes(id)
                   const disabled = !checked && selected.length >= 5
                   return (
-                    <tr key={id}>
+                    <tr key={id} className={fund.is_portfolio_held ? 'is-portfolio-held' : undefined}>
                       <td className="check-column"><button type="button" className={checked ? 'row-check is-checked' : 'row-check'} aria-label={`${checked ? '取消选择' : '选择'} ${fund.canonical_name}`} aria-pressed={checked} disabled={disabled} onClick={() => toggleFund(id)}>{checked && <Check size={13} />}</button></td>
-                      <td className="fund-column"><Link className="fund-identity" to={`/funds/${encodeURIComponent(id)}`}><strong>{displayText(fund.canonical_name, '未命名基金')}</strong><span><code>{fund.representative_code}</code>{fund.manager_name}</span></Link></td>
-                      {visible('tech_scope') && <td className="scope-column"><span className="scope-label">{techScopeLabel(field(fund, 'tech_scope'))}</span><small className="table-subline">{wrapperLabel(field(fund, 'wrapper_type'))} · {displayText(fund.original_category, '未分类')}</small></td>}
+                      <td className="fund-column"><Link className="fund-identity" to={`/funds/${encodeURIComponent(id)}`}><strong>{displayText(fund.canonical_name, '未命名基金')}{fund.is_portfolio_held && <span className="portfolio-held-badge">持仓</span>}</strong><span><code>{fund.representative_code}</code>{fund.manager_name}</span></Link></td>
+                      {visible('tech_scope') && <td className="scope-column"><span className="scope-label">{techScopeLabel(field(fund, 'tech_scope'))}</span><small className="table-subline">{researchScopeLabel(fund.research_scope)} · {wrapperLabel(field(fund, 'wrapper_type'))} · {displayText(fund.original_category, '未分类')}</small></td>}
                       {visible('equity_nav_pct') && <td className="numeric metric-cell">{formatPercent(field(fund, 'equity_nav_pct'))}</td>}
                       {visible('fund_investment_nav_pct') && <td className="numeric metric-cell">{formatPercent(field(fund, 'fund_investment_nav_pct'))}</td>}
                       {visible('us_country_pct') && <td className="numeric metric-cell">{formatPercent(field(fund, 'us_country_pct'))}</td>}

@@ -13,8 +13,13 @@ from backend.app.ingestion.providers.base import (
     FundCompanyChoice,
     PublicFundCandidate,
 )
+from backend.app.ingestion.providers.catalog import research_scope
 from backend.app.ingestion.storage import StoragePreflightError
 from backend.app.models import FundContract, FundShare, SourceArtifact
+
+
+def test_research_scope_recognizes_mobile_internet_funds() -> None:
+    assert research_scope("华夏移动互联混合人民币", "QDII-混合灵活") == "TECHNOLOGY"
 
 
 class FakeCatalogProvider:

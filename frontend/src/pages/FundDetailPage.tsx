@@ -19,7 +19,7 @@ import {
   WalletCards,
 } from 'lucide-react'
 import { useMemo } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router'
 import { api } from '../api/client'
 import type {
   ExposureItem,
@@ -221,7 +221,7 @@ function dailyReturnChartOption(points: NavPoint[]): EChartsOption {
     grid: { top: 42, right: 18, bottom: 38, left: 56 },
     tooltip: {
       trigger: 'axis',
-      valueFormatter: (value) => `${Number(value).toFixed(2)}%`,
+      valueFormatter: (value) => formatSignedPercent(Array.isArray(value) ? value[value.length - 1] : value),
     },
     legend: {
       type: 'scroll',
@@ -236,19 +236,24 @@ function dailyReturnChartOption(points: NavPoint[]): EChartsOption {
     },
     yAxis: {
       type: 'value',
-      scale: true,
       axisLabel: { color: '#7b838c', formatter: '{value}%' },
       splitLine: { lineStyle: { color: '#ece9e2' } },
     },
     dataZoom: [{ type: 'inside' }, { type: 'slider', height: 16, bottom: 4 }],
     series: grouped.map((code) => ({
       name: shareCodes.length > 0 ? `${code} 日涨跌幅` : code,
-      type: 'line',
-      showSymbol: false,
-      smooth: false,
+      type: 'bar',
+      barMaxWidth: 14,
+      emphasis: { focus: 'series' },
       data: ordered
         .filter((point) => shareCodes.length === 0 || point.share_code === code)
-        .map((point) => [point.nav_date, dailyReturn(point)]),
+        .map((point) => {
+          const value = dailyReturn(point)
+          return {
+            value: [point.nav_date, value],
+            itemStyle: { color: value === null ? '#a8afb7' : value >= 0 ? '#b1432f' : '#176b5f' },
+          }
+        }),
       markLine: {
         silent: true,
         symbol: 'none',
@@ -612,7 +617,7 @@ export function FundDetailPage() {
             <div>
               <div className="chart-subheading">
                 <h3>每日涨跌幅</h3>
-                <span>最新 {formatDate(field(fund, 'latest_nav_date'))} · <strong className={returnTone(field(fund, 'latest_nav_return_pct'))}>{formatSignedPercent(field(fund, 'latest_nav_return_pct'))}</strong></span>
+                <span>红涨绿跌 · 最新 {formatDate(field(fund, 'latest_nav_date'))} · <strong className={returnTone(field(fund, 'latest_nav_return_pct'))}>{formatSignedPercent(field(fund, 'latest_nav_return_pct'))}</strong></span>
               </div>
               {hasReturnData ? (
                 <EChart option={returnOption} height={310} ariaLabel="基金每日净值涨跌幅百分比时间序列图" />

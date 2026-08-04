@@ -19,7 +19,10 @@ import type {
   PortfolioCapability,
   PortfolioImportPreview,
   PortfolioImportResult,
+  PortfolioConsistencyPayload,
+  PortfolioEditableInput,
   PortfolioPayload,
+  PortfolioPositionCreateInput,
   PurchaseLimit,
   PurchaseLimitChannelType,
   PurchaseLimitCoverage,
@@ -151,6 +154,8 @@ export const api = {
   portfolioCapability: (signal?: AbortSignal) =>
     request<PortfolioCapability>('/api/portfolio/capability', signal),
   portfolio: (signal?: AbortSignal) => request<PortfolioPayload>('/api/portfolio', signal),
+  portfolioConsistency: (signal?: AbortSignal) =>
+    request<PortfolioConsistencyPayload>('/api/portfolio/consistency', signal),
   previewPortfolioImport: (
     filename: string,
     contentBase64: string,
@@ -170,6 +175,27 @@ export const api = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filename, content_base64: contentBase64, file_digest: fileDigest }),
   }),
+  createPortfolioPosition: (
+    payload: PortfolioPositionCreateInput,
+    signal?: AbortSignal,
+  ) => request<PortfolioImportResult>('/api/portfolio/positions', signal, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }),
+  updatePortfolioPosition: (
+    id: string,
+    payload: PortfolioEditableInput,
+    signal?: AbortSignal,
+  ) => request<PortfolioImportResult>(
+    `/api/portfolio/positions/${encodeURIComponent(id)}`,
+    signal,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  ),
   funds: (signal?: AbortSignal) =>
     requestCollection<FundSummary>('/api/funds', ['funds'], signal),
   archiveFund: (id: string, signal?: AbortSignal) =>
@@ -262,11 +288,16 @@ export const api = {
     operation: DataOperationName,
     fundCodes: string[] = [],
     lookbackDays = 10,
+    force = false,
     signal?: AbortSignal,
   ) => request<DataOperationResult>(`/api/operations/${operation}`, signal, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fund_codes: fundCodes, lookback_days: lookbackDays }),
+    body: JSON.stringify({
+      fund_codes: fundCodes,
+      lookback_days: lookbackDays,
+      ...(force ? { force: true } : {}),
+    }),
   }),
   fundCatalogOptions: (signal?: AbortSignal) =>
     request<FundCatalogOptions>('/api/fund-catalog/options', signal),

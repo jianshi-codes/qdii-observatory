@@ -53,6 +53,7 @@ def test_import_portfolio_anchors_nav_and_preserves_dividend_aware_platform_valu
                         "share_code": "123456",
                         "platform": "测试平台",
                         "snapshot_date": "2026-08-01",
+                        "units": "7974.48",
                         "market_value": "10000.00",
                         "holding_profit": "500.00",
                         "holding_return_pct": "5.00",
@@ -80,6 +81,7 @@ def test_import_portfolio_anchors_nav_and_preserves_dividend_aware_platform_valu
     assert position is not None
     assert position.anchor_nav_date == date(2026, 7, 30)
     assert position.anchor_unit_nav == Decimal("1.25400000")
+    assert position.reported_units == Decimal("7974.48000000")
     assert position.reported_return_pct == Decimal("5.00000000")
     assert position.reported_cumulative_profit_amount == Decimal("750.000000")
     assert position.recurring_net_amount == Decimal("99.850000")
@@ -99,6 +101,7 @@ def test_import_portfolio_anchors_nav_and_preserves_dividend_aware_platform_valu
                     "share_code": "123456",
                     "platform": "测试平台",
                     "snapshot_date": "2026-08-01",
+                    "units": "8771.93",
                     "market_value": "11000.00",
                     "holding_profit": "600.00",
                     "holding_return_pct": "5.77",

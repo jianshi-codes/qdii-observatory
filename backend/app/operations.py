@@ -38,8 +38,12 @@ def initialize_project(root: Path) -> InitResult:
             data_dir.mkdir(parents=True)
             created.append(str(data_dir.relative_to(root)))
     overrides = {
-        root / "config" / "fund-analysis-proxies.local.yaml": "funds: {}\n",
-        root / "config" / "analysis-security-map.local.yaml": "securities: {}\n",
+        root / "config" / "fund-analysis-proxies.local.yaml": (
+            "version: 1\nalignment_overrides: {}\nfunds: {}\nconsistency_rules: {}\n"
+        ),
+        root / "config" / "analysis-security-map.local.yaml": (
+            "version: 1\nmappings: []\n"
+        ),
         root / "config" / "local.yaml": "{}\n",
     }
     for path, content in overrides.items():

@@ -62,6 +62,17 @@ class PortfolioRecurringPlanRead(ApiModel):
     fee_pct: Decimal
     net_amount: Decimal
     currency: str
+    confirmation_lag_days: int
+
+
+class PortfolioRecurringOrderRead(ApiModel):
+    status: Literal["PENDING", "SETTLED"]
+    order_date: date
+    expected_confirmation_date: date
+    gross_amount: Decimal
+    net_amount: Decimal
+    settled_nav_date: date | None
+    confirmed_at: datetime | None
 
 
 class PortfolioFeeRead(ApiModel):
@@ -82,10 +93,12 @@ class PortfolioPositionRead(ApiModel):
     fund_id: int
     canonical_name: str
     manager_name: str
+    representative_code: str
     share_code: str
     platform: str
     currency: str
     snapshot_date: date
+    reported_units: Decimal
     reported_market_value: Decimal
     reported_profit_amount: Decimal
     reported_return_pct: Decimal
@@ -108,6 +121,16 @@ class PortfolioPositionRead(ApiModel):
     cash_dividend_total: Decimal
     cash_flows: list[PortfolioCashFlowRead]
     recurring_plan: PortfolioRecurringPlanRead | None
+    recurring_execution_count: int
+    recurring_invested_gross_amount: Decimal
+    recurring_invested_net_amount: Decimal
+    last_recurring_nav_date: date | None
+    recurring_pending_order_count: int
+    recurring_pending_gross_amount: Decimal
+    latest_recurring_order: PortfolioRecurringOrderRead | None
+    manual_purchase_fee_pct: Decimal | None
+    manual_management_fee_pct_annual: Decimal | None
+    manual_custody_fee_pct_annual: Decimal | None
     fees: PortfolioFeeRead
     data_quality_note: str | None
 
@@ -123,6 +146,11 @@ class PortfolioCurrencySummaryRead(ApiModel):
     recurring_gross_amount: Decimal
     recurring_net_amount: Decimal
     recurring_net_pct: Decimal | None
+    recurring_execution_count: int
+    recurring_invested_gross_amount: Decimal
+    recurring_invested_net_amount: Decimal
+    recurring_pending_order_count: int
+    recurring_pending_gross_amount: Decimal
 
 
 class PortfolioConvertedSummaryRead(ApiModel):
@@ -174,6 +202,7 @@ class PortfolioImportPositionPreviewRead(ApiModel):
     platform: str
     snapshot_date: date
     currency: str
+    units: Decimal
     market_value: Decimal
     holding_profit: Decimal
     holding_return_pct: Decimal
@@ -208,6 +237,41 @@ class PortfolioImportResultRead(ApiModel):
     nav_synced: list[str]
 
 
+class PortfolioRecurringPlanWrite(ApiModel):
+    gross_amount: Decimal = Field(gt=0)
+    fee_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    confirmation_lag_days: int = Field(default=2, ge=0, le=10)
+
+
+class PortfolioPositionEditableWrite(ApiModel):
+    snapshot_date: date
+    units: Decimal = Field(gt=0)
+    market_value: Decimal = Field(gt=0)
+    holding_profit: Decimal
+    holding_return_pct: Decimal
+    cumulative_profit: Decimal | None = None
+    recurring_plan: PortfolioRecurringPlanWrite | None = None
+    purchase_fee_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    management_fee_pct_annual: Decimal | None = Field(default=None, ge=0, le=100)
+    custody_fee_pct_annual: Decimal | None = Field(default=None, ge=0, le=100)
+
+    @field_validator("snapshot_date")
+    @classmethod
+    def snapshot_must_not_be_in_the_future(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("快照日期不能晚于今天")
+        return value
+
+
+class PortfolioPositionCreateRequest(PortfolioPositionEditableWrite):
+    share_code: str = Field(pattern=r"^[0-9]{6}$")
+    platform: str = Field(min_length=1, max_length=100)
+
+
+class PortfolioPositionUpdateRequest(PortfolioPositionEditableWrite):
+    pass
+
+
 class FundSummaryRead(ApiModel):
     id: int
     canonical_name: str
@@ -215,8 +279,10 @@ class FundSummaryRead(ApiModel):
     representative_code: str
     strategy_type: str | None
     original_category: str | None
+    research_scope: str
     wrapper_type: str | None
     tech_scope: str
+    is_portfolio_held: bool = False
     is_user_selected: bool
     is_dependency: bool
     latest_report_id: int | None = None
@@ -573,7 +639,8 @@ class IngestionRunRead(ApiModel):
 
 class DataOperationRequest(ApiModel):
     fund_codes: list[str] = Field(default_factory=list)
-    lookback_days: int = Field(default=10, ge=1, le=30)
+    lookback_days: int = Field(default=10, ge=1, le=100)
+    force: bool = False
 
     @field_validator("fund_codes")
     @classmethod
@@ -601,6 +668,11 @@ class DataOperationRead(ApiModel):
     run_ids: list[int]
     records_written: int
     records_failed: int
+    recurring_orders_created: int
+    recurring_orders_settled: int
+    recurring_executions_written: int
+    recurring_positions_updated: int
+    recurring_latest_nav_date: date | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -610,6 +682,7 @@ class DataOperationRead(ApiModel):
 class DataPreparationStatusRead(ApiModel):
     active_operation: str | None
     latest_operation: DataOperationRead | None
+    latest_daily_operation: DataOperationRead | None
     total_funds: int
     total_shares: int
     nav_ready_funds: int
@@ -787,3 +860,73 @@ class Q2FundAnalysisRead(ApiModel):
     sources: list[Q2AnalysisSourceRead]
     market_data_errors: list[str]
     series: list[Q2SeriesPointRead] = Field(default_factory=list)
+
+
+class Q2PortfolioPredictionRead(ApiModel):
+    predicted_return_pct: Decimal | None
+    lower_bound_pct: Decimal | None
+    upper_bound_pct: Decimal | None
+    analyzed_portfolio_weight_pct: Decimal | None
+
+
+class Q2PortfolioFundRead(ApiModel):
+    fund_id: int
+    representative_code: str
+    fund_name: str
+    share_codes: list[str]
+    report_period_end: date
+    report_public_available_at: datetime
+    portfolio_weight_pct: Decimal
+    prediction_date: date | None
+    prediction_nav_date: date | None
+    predicted_return_pct: Decimal | None
+    comparison_date: date | None
+    comparison_nav_date: date | None
+    comparison_analysis_mode: Q2AnalysisMode | None
+    comparison_predicted_return_pct: Decimal | None
+    actual_return_pct: Decimal | None
+    actual_minus_predicted_pct: Decimal | None
+    quarter_cumulative_through_date: date | None
+    quarter_cumulative_through_nav_date: date | None
+    quarter_cumulative_actual_return_pct: Decimal | None
+    quarter_cumulative_predicted_return_pct: Decimal | None
+    quarter_cumulative_actual_minus_predicted_pct: Decimal | None
+    quarter_cumulative_observation_count: int | None
+    status: Q2ConsistencyStatus
+    coverage_pct: Decimal | None
+
+
+class Q2PortfolioExposureRead(ApiModel):
+    name: str
+    portfolio_exposure_pct: Decimal
+
+
+class Q2OverlapSecurityRead(ApiModel):
+    symbol: str
+    security_name: str
+    left_weight_pct: Decimal
+    right_weight_pct: Decimal
+    overlap_weight_pct: Decimal
+
+
+class Q2PortfolioOverlapRead(ApiModel):
+    left_fund_id: int
+    left_fund_name: str
+    right_fund_id: int
+    right_fund_name: str
+    overlap_weight_pct: Decimal
+    securities: list[Q2OverlapSecurityRead]
+
+
+class Q2PortfolioAnalysisRead(ApiModel):
+    data_as_of: date
+    market_data_fetched_at: datetime | None
+    analysis_start_date: date
+    as_of: date
+    portfolio_prediction: Q2PortfolioPredictionRead
+    funds: list[Q2PortfolioFundRead]
+    country_exposure: list[Q2PortfolioExposureRead]
+    industry_exposure: list[Q2PortfolioExposureRead]
+    overlaps: list[Q2PortfolioOverlapRead]
+    limitations: list[str]
+    sources: list[Q2AnalysisSourceRead]

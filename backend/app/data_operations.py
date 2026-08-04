@@ -32,6 +32,7 @@ from backend.app.models import (
     IngestionRun,
     ReportDerivedMetrics,
 )
+from backend.app.portfolio_recurring import create_recurring_orders, settle_recurring_plans
 
 
 class NoSelectedFundsError(RuntimeError):
@@ -53,6 +54,11 @@ class DataOperationResult:
     report_year: int | None = None
     report_quarter: int | None = None
     lookthrough_reports: int | None = None
+    recurring_orders_created: int = 0
+    recurring_orders_settled: int = 0
+    recurring_executions_written: int = 0
+    recurring_positions_updated: int = 0
+    recurring_latest_nav_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +129,7 @@ def sync_daily_data(
     fund_codes: tuple[str, ...],
     lookback_days: int = 10,
 ) -> DataOperationResult:
+    order_creation = create_recurring_orders(session, fund_codes=fund_codes)
     share_codes = share_codes_for_funds(session, fund_codes)
     with provider_client("eastmoney_nav", "eastmoney_market", "csrc_reports", "ecb_fx") as http:
         nav_run, market_run = sync_daily(
@@ -141,12 +148,18 @@ def sync_daily_data(
             fund_codes=set(fund_codes),
         )
         fx_run = sync_exchange_rates(session, EcbExchangeRateProvider(http), raw_root)
+    settlement = settle_recurring_plans(session, fund_codes=fund_codes)
     runs = (nav_run, market_run, limit_run, fx_run)
     return DataOperationResult(
         operation="sync_daily",
         status=_combined_status(runs),
         fund_codes=fund_codes,
         runs=runs,
+        recurring_orders_created=order_creation.orders_created,
+        recurring_orders_settled=settlement.orders_settled,
+        recurring_executions_written=settlement.executions_written,
+        recurring_positions_updated=settlement.positions_updated,
+        recurring_latest_nav_date=settlement.latest_nav_date,
     )
 
 
@@ -278,13 +291,26 @@ def preparation_status(session: Session, *, today: date | None = None) -> DataPr
     total_shares = session.scalar(
         select(func.count(FundShare.id)).where(FundShare.fund_contract_id.in_(fund_ids))
     )
-    nav_fund_ids = set(
-        session.scalars(
-            select(FundShare.fund_contract_id)
-            .join(DailyFundNav, DailyFundNav.fund_share_id == FundShare.id)
-            .where(FundShare.fund_contract_id.in_(fund_ids))
-            .distinct()
-        ).all()
+    latest_nav_date = session.scalar(
+        select(func.max(DailyFundNav.nav_date))
+        .join(FundShare, DailyFundNav.fund_share_id == FundShare.id)
+        .where(FundShare.fund_contract_id.in_(fund_ids))
+    )
+    share_nav_dates = session.execute(
+        select(FundShare.fund_contract_id, func.max(DailyFundNav.nav_date))
+        .outerjoin(DailyFundNav, DailyFundNav.fund_share_id == FundShare.id)
+        .where(FundShare.fund_contract_id.in_(fund_ids))
+        .group_by(FundShare.id, FundShare.fund_contract_id)
+    ).all()
+    nav_dates_by_fund: dict[int, list[date | None]] = {}
+    for fund_id, nav_date in share_nav_dates:
+        nav_dates_by_fund.setdefault(fund_id, []).append(nav_date)
+    nav_ready_funds = sum(
+        1
+        for fund_id in fund_ids
+        if latest_nav_date is not None
+        and nav_dates_by_fund.get(fund_id)
+        and all(nav_date == latest_nav_date for nav_date in nav_dates_by_fund[fund_id])
     )
     limit_fund_ids = set(
         session.scalars(
@@ -322,12 +348,8 @@ def preparation_status(session: Session, *, today: date | None = None) -> DataPr
     return DataPreparationStatus(
         total_funds=len(fund_ids),
         total_shares=int(total_shares or 0),
-        nav_ready_funds=len(nav_fund_ids),
-        latest_nav_date=session.scalar(
-            select(func.max(DailyFundNav.nav_date))
-            .join(FundShare, DailyFundNav.fund_share_id == FundShare.id)
-            .where(FundShare.fund_contract_id.in_(fund_ids))
-        ),
+        nav_ready_funds=nav_ready_funds,
+        latest_nav_date=latest_nav_date,
         limit_ready_funds=len(limit_fund_ids),
         latest_limit_snapshot_date=session.scalar(
             select(func.max(DailyPurchaseLimit.snapshot_date))

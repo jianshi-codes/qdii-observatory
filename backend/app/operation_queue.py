@@ -126,6 +126,12 @@ def execute_operation(session: Session, operation_id: int, raw_root: Path) -> Da
             current.run_ids = [*current.run_ids, *(run.id for run in result.runs)]
             current.records_written += sum(run.records_written for run in result.runs)
             current.records_failed += sum(run.records_failed for run in result.runs)
+            current.recurring_orders_created += result.recurring_orders_created
+            current.recurring_orders_settled += result.recurring_orders_settled
+            current.recurring_executions_written += result.recurring_executions_written
+            current.recurring_positions_updated += result.recurring_positions_updated
+            if result.recurring_latest_nav_date is not None:
+                current.recurring_latest_nav_date = result.recurring_latest_nav_date
             session.commit()
     except Exception as error:
         session.rollback()

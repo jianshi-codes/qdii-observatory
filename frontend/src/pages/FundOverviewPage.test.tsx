@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FundOverviewPage } from './FundOverviewPage'
 
@@ -93,6 +93,65 @@ describe('FundOverviewPage', () => {
     expect(selectors[5]).toBeDisabled()
   })
 
+  it('highlights portfolio funds and filters by holding, research domain, and tech scope', async () => {
+    const funds = [
+      {
+        id: 1,
+        canonical_name: '持仓主动科技基金',
+        manager_name: '测试基金公司',
+        representative_code: '000001',
+        original_category: 'QDII-普通股票',
+        research_scope: 'TECHNOLOGY',
+        strategy_type: '全球主动股票',
+        tech_scope: 'GLOBAL_ACTIVE_TECH_HIGH',
+        is_portfolio_held: true,
+      },
+      {
+        id: 2,
+        canonical_name: '非持仓科技指数基金',
+        manager_name: '测试基金公司',
+        representative_code: '000002',
+        original_category: 'QDII-指数股票',
+        research_scope: 'TECHNOLOGY',
+        strategy_type: '被动指数',
+        tech_scope: 'NASDAQ_TECH_PURE',
+        is_portfolio_held: false,
+      },
+      {
+        id: 3,
+        canonical_name: '商品基金',
+        manager_name: '另一基金公司',
+        representative_code: '000003',
+        original_category: 'QDII-商品',
+        research_scope: 'COMMODITY',
+        strategy_type: '商品',
+        tech_scope: 'UNKNOWN',
+        is_portfolio_held: false,
+      },
+    ]
+    vi.stubGlobal('fetch', vi.fn(() => response({ items: funds, total: funds.length })))
+    const user = userEvent.setup()
+    renderPage()
+
+    const heldName = await screen.findByText('持仓主动科技基金')
+    expect(heldName.closest('tr')).toHaveClass('is-portfolio-held')
+    expect(within(heldName.closest('tr') as HTMLTableRowElement).getByText('持仓')).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: '按持仓状态筛选' }), 'HELD')
+    expect(screen.getByText('持仓主动科技基金')).toBeInTheDocument()
+    expect(screen.queryByText('非持仓科技指数基金')).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: '按持仓状态筛选' }), 'ALL')
+    await user.selectOptions(screen.getByRole('combobox', { name: '按研究领域筛选' }), 'TECHNOLOGY')
+    expect(screen.getByText('持仓主动科技基金')).toBeInTheDocument()
+    expect(screen.getByText('非持仓科技指数基金')).toBeInTheDocument()
+    expect(screen.queryByText('商品基金')).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: '按科技细分口径筛选' }), 'GLOBAL_ACTIVE_ALL')
+    expect(screen.getByText('持仓主动科技基金')).toBeInTheDocument()
+    expect(screen.queryByText('非持仓科技指数基金')).not.toBeInTheDocument()
+  })
+
   it('shows a recoverable API error state', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('connection refused'))))
     renderPage()
@@ -148,8 +207,8 @@ describe('FundOverviewPage', () => {
 
     await page.findByText('低美国暴露基金')
     expect(page.getByText('+1.25%')).toBeInTheDocument()
-    expect(page.getByRole('button', { name: '香港' })).toBeInTheDocument()
-    expect(page.getByRole('button', { name: '中国大陆' })).toBeInTheDocument()
+    expect(page.getByRole('button', { name: '中国香港' })).toBeInTheDocument()
+    expect(page.getByRole('button', { name: '中国内地' })).toBeInTheDocument()
     expect(page.queryByRole('button', { name: '信息技术' })).not.toBeInTheDocument()
     expect(page.getByRole('columnheader', { name: '最新预估涨幅' })).toBeInTheDocument()
     expect(page.queryByRole('link', { name: /1万元\/日/ })).not.toBeInTheDocument()
@@ -162,13 +221,13 @@ describe('FundOverviewPage', () => {
     rows = page.getAllByRole('row').slice(1)
     expect(within(rows[0]).getByText('低美国暴露基金')).toBeInTheDocument()
 
-    await user.click(page.getByRole('button', { name: '香港' }))
+    await user.click(page.getByRole('button', { name: '中国香港' }))
     rows = page.getAllByRole('row').slice(1)
     expect(within(rows[0]).getByText('低美国暴露基金')).toBeInTheDocument()
 
     await user.click(page.getByText('显示字段'))
-    expect(page.getByRole('checkbox', { name: '香港' })).toBeChecked()
-    expect(page.getByRole('checkbox', { name: '中国大陆' })).toBeChecked()
+    expect(page.getByRole('checkbox', { name: '中国香港' })).toBeChecked()
+    expect(page.getByRole('checkbox', { name: '中国内地' })).toBeChecked()
     expect(page.getByRole('checkbox', { name: '信息技术' })).not.toBeChecked()
     expect(page.getByRole('checkbox', { name: '最新预估涨幅' })).toBeChecked()
     expect(page.getByRole('checkbox', { name: '直销限额' })).not.toBeChecked()

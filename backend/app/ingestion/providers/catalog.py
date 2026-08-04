@@ -25,8 +25,8 @@ PUBLIC_CATALOG_DOCUMENT = re.compile(r"datas:(\[.*?\]),count:", re.DOTALL)
 PUBLIC_CATALOG_RECORD = re.compile(r',record:"([0-9]+)"')
 
 RESEARCH_SCOPES = (
-    ("ALL", "全部 QDII"),
-    ("TECHNOLOGY", "名称关键词：科技 / 数字经济"),
+    ("ALL", "全部研究领域"),
+    ("TECHNOLOGY", "科技相关（名称关键词）"),
     ("EQUITY", "权益"),
     ("FIXED_INCOME", "固收"),
     ("COMMODITY", "商品"),
@@ -338,16 +338,26 @@ def _candidate(
         manager_code=manager_code,
         manager_name=manager_name,
         category=category,
-        research_scope=_research_scope(fund_name, category),
+        research_scope=research_scope(fund_name, category),
         currency=_currency(fund_name),
         wrapper_type=_wrapper(fund_name, category),
         source_url=source_url,
     )
 
 
-def _research_scope(name: str, category: str) -> str:
+def research_scope(name: str, category: str) -> str:
+    """Return the shared heuristic research domain used by catalog and overview."""
     text = f"{name} {category}".upper()
-    technology_terms = ("科技", "芯片", "半导体", "互联网", "数字经济", "人工智能", "AI")
+    technology_terms = (
+        "科技",
+        "芯片",
+        "半导体",
+        "互联网",
+        "移动互联",
+        "数字经济",
+        "人工智能",
+        "AI",
+    )
     if any(word in text for word in technology_terms):
         return "TECHNOLOGY"
     if any(word in text for word in ("商品", "原油", "黄金", "白银", "有色")):

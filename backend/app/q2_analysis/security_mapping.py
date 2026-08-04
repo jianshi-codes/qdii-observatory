@@ -13,7 +13,8 @@ import yaml
 from backend.app.models import ReportSecurityHolding
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[3]
-DEFAULT_MAPPING_PATH: Final = REPOSITORY_ROOT / "config" / "analysis-security-map.yaml"
+PUBLIC_MAPPING_PATH: Final = REPOSITORY_ROOT / "config" / "analysis-security-map.yaml"
+LOCAL_MAPPING_PATH: Final = REPOSITORY_ROOT / "config" / "analysis-security-map.local.yaml"
 SYMBOL_PATTERN: Final = re.compile(r"^[A-Z0-9^][A-Z0-9.^=-]*$")
 CANONICAL_MARKETS: Final = frozenset({"US", "HK", "KR", "JP", "CN_SH", "CN_SZ", "UK"})
 CODE_SUFFIX_MARKETS: Final = {"US": "US", "JP": "JP", "KS": "KR", "HK": "HK"}
@@ -42,35 +43,72 @@ class SecurityMapping:
 
 
 @lru_cache(maxsize=8)
-def load_manual_mappings(path: Path = DEFAULT_MAPPING_PATH) -> tuple[ManualSecurityMapping, ...]:
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or document.get("version") != 1:
-        raise ValueError("Security mapping config must have version: 1")
-    rows = document.get("mappings")
-    if not isinstance(rows, list):
-        raise ValueError("Security mapping config must contain a mappings list")
+def load_manual_mappings(path: Path | None = None) -> tuple[ManualSecurityMapping, ...]:
+    documents = _mapping_documents(path)
     result: list[ManualSecurityMapping] = []
-    for index, raw in enumerate(rows):
-        if not isinstance(raw, dict) or not isinstance(raw.get("match"), dict):
-            raise ValueError(f"mappings[{index}] must contain a match object")
-        match = raw["match"]
-        code = _required_text(match, "security_code_raw").upper()
-        market = _optional_text(match.get("market"))
-        symbol = _required_text(raw, "symbol").upper()
-        currency = _currency(_required_text(raw, "currency"))
-        reason = _required_text(raw, "reason")
-        if not SYMBOL_PATTERN.fullmatch(symbol):
-            raise ValueError(f"mappings[{index}].symbol is invalid: {symbol}")
-        result.append(
-            ManualSecurityMapping(
-                security_code_raw=code,
-                market=_canonical_market(market),
-                symbol=symbol,
-                currency=currency,
-                reason=reason,
+    seen: set[tuple[str, str | None]] = set()
+    for document_path, document in documents:
+        rows = document.get("mappings", [])
+        if not isinstance(rows, list):
+            raise ValueError(
+                f"Security mapping config must contain a mappings list: {document_path}"
+            )
+        for index, raw in enumerate(rows):
+            if not isinstance(raw, dict) or not isinstance(raw.get("match"), dict):
+                raise ValueError(
+                    f"{document_path}: mappings[{index}] must contain a match object"
+                )
+            match = raw["match"]
+            code = _required_text(match, "security_code_raw").upper()
+            market = _canonical_market(_optional_text(match.get("market")))
+            key = (code, market)
+            if key in seen:
+                continue
+            symbol = _required_text(raw, "symbol").upper()
+            currency = _currency(_required_text(raw, "currency"))
+            reason = _required_text(raw, "reason")
+            if not SYMBOL_PATTERN.fullmatch(symbol):
+                raise ValueError(
+                    f"{document_path}: mappings[{index}].symbol is invalid: {symbol}"
+                )
+            result.append(
+                ManualSecurityMapping(
+                    security_code_raw=code,
+                    market=market,
+                    symbol=symbol,
+                    currency=currency,
+                    reason=reason,
+                )
+            )
+            seen.add(key)
+    return tuple(result)
+
+
+def _mapping_documents(path: Path | None) -> tuple[tuple[Path, dict[str, Any]], ...]:
+    if path is not None:
+        return ((path, _read_mapping_document(path, require_version=True)),)
+    documents: list[tuple[Path, dict[str, Any]]] = []
+    if LOCAL_MAPPING_PATH.is_file():
+        documents.append(
+            (
+                LOCAL_MAPPING_PATH,
+                _read_mapping_document(LOCAL_MAPPING_PATH, require_version=False),
             )
         )
-    return tuple(result)
+    documents.append(
+        (PUBLIC_MAPPING_PATH, _read_mapping_document(PUBLIC_MAPPING_PATH, require_version=True))
+    )
+    return tuple(documents)
+
+
+def _read_mapping_document(path: Path, *, require_version: bool) -> dict[str, Any]:
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError(f"Security mapping config must be an object: {path}")
+    version = document.get("version")
+    if (require_version and version != 1) or (version is not None and version != 1):
+        raise ValueError(f"Security mapping config must have version: 1: {path}")
+    return document
 
 
 def map_security_holding(

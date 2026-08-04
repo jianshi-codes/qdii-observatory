@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,38 @@ from backend.app.models import (
     FundShare,
     ReportDerivedMetrics,
 )
+from backend.app.q2_analysis.portfolio_review import _common_cumulative_points
+
+
+def test_common_cumulative_points_use_shared_dates_across_share_classes() -> None:
+    first = tuple(
+        SimpleNamespace(
+            nav_date=date(2026, 7, day),
+            actual_return_pct=Decimal("1"),
+            predicted_return_pct=Decimal("0"),
+            analysis_mode="Q2_LIVE",
+        )
+        for day in (2, 3)
+    )
+    second = tuple(
+        SimpleNamespace(
+            nav_date=date(2026, 7, day),
+            actual_return_pct=Decimal("10" if day == 1 else "1"),
+            predicted_return_pct=Decimal("0"),
+            analysis_mode="Q2_LIVE",
+        )
+        for day in (1, 2, 3)
+    )
+
+    result = _common_cumulative_points((first, second), date(2026, 7, 3))  # type: ignore[arg-type]
+
+    assert result is not None
+    points, count = result
+    assert count == 2
+    assert [point.cumulative_actual_return_pct for point in points] == [
+        Decimal("2.01000000"),
+        Decimal("2.01000000"),
+    ]
 
 
 def test_disclosed_holdings_baseline_is_traceable_and_neutral(

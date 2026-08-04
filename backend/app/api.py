@@ -7,11 +7,12 @@ import binascii
 from collections import Counter, defaultdict
 from collections.abc import Generator
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from itertools import combinations
 from math import sqrt
 from typing import Annotated, Literal, NoReturn, cast
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import Select, and_, func, or_, select
@@ -41,6 +42,7 @@ from backend.app.ingestion.providers.catalog import (
     RESEARCH_SCOPES,
     SOURCE_CATEGORIES,
     EastmoneyFundCatalogProvider,
+    research_scope,
 )
 from backend.app.ingestion.providers.nav import EastmoneyNavProvider
 from backend.app.ingestion.storage import StoragePreflightError, raw_data_dir
@@ -73,20 +75,27 @@ from backend.app.operation_queue import (
 )
 from backend.app.portfolio import import_portfolio_payload
 from backend.app.portfolio_import import (
+    PortfolioWorkbook,
     anchor_missing_codes,
     build_portfolio_preview,
     nav_sync_range,
     parse_portfolio_workbook,
 )
+from backend.app.portfolio_recurring import recurring_plans_pending
 from backend.app.q2_analysis import ANALYSIS_START_DATE, MODEL_NAME
 from backend.app.q2_analysis.consistency import ConsistencyRules, evaluate_consistency
 from backend.app.q2_analysis.market_provider import YahooChartMarketProvider
-from backend.app.q2_analysis.portfolio_review import analyze_fund
+from backend.app.q2_analysis.portfolio_review import (
+    PortfolioAnalysisResult,
+    analyze_fund,
+    analyze_portfolio,
+)
 from backend.app.q2_analysis.predictor import load_consistency_rule_values
 from backend.app.q2_analysis.scope import (
     AnalysisScopeError,
     AnalysisTarget,
     select_explicit_active_fund,
+    select_portfolio_active_funds,
     validate_analysis_dates,
 )
 from backend.app.schemas import (
@@ -129,8 +138,12 @@ from backend.app.schemas import (
     PortfolioImportFileRequest,
     PortfolioImportPreviewRead,
     PortfolioImportResultRead,
+    PortfolioPositionCreateRequest,
+    PortfolioPositionEditableWrite,
     PortfolioPositionRead,
+    PortfolioPositionUpdateRequest,
     PortfolioRead,
+    PortfolioRecurringOrderRead,
     PortfolioRecurringPlanRead,
     PublicFundCandidateRead,
     PublicFundImportRead,
@@ -140,6 +153,7 @@ from backend.app.schemas import (
     PurchaseLimitsRead,
     PurchaseLimitSummaryRead,
     Q2FundAnalysisRead,
+    Q2PortfolioAnalysisRead,
     ResearchScopeChoiceRead,
     ReturnCorrelationRead,
     SecurityHoldingRead,
@@ -152,7 +166,6 @@ DbSession = Annotated[Session, Depends(get_db)]
 ExposureBasis = Literal["DIRECT", "LOOKTHROUGH"]
 PurchaseLimitChannel = Literal["DIRECT", "DISTRIBUTION"]
 CENT = Decimal("0.01")
-QUANTITY_SCALE = Decimal("0.00000001")
 PERCENT_SCALE = Decimal("0.00000001")
 PROVIDER_RUN_IDENTITIES = {
     "eastmoney_catalog": ("import_public_funds", "EASTMONEY_FUND_CATALOG"),
@@ -359,14 +372,26 @@ def _limit_summary(row: DailyPurchaseLimit | None) -> PurchaseLimitSummaryRead |
 
 def _fund_summaries(db: Session, funds: list[FundContract]) -> list[FundSummaryRead]:
     fund_ids = [fund.id for fund in funds]
+    held_fund_ids = set(
+        db.scalars(
+            select(FundShare.fund_contract_id)
+            .join(
+                PortfolioPosition,
+                PortfolioPosition.fund_share_id == FundShare.id,
+            )
+            .where(
+                FundShare.fund_contract_id.in_(fund_ids),
+                PortfolioPosition.is_active.is_(True),
+            )
+            .distinct()
+        ).all()
+    ) if fund_ids else set()
     reports = _latest_reports(db, fund_ids)
     nav_rows = _latest_representative_nav(db, fund_ids)
     report_ids = [report.id for report in reports.values()]
     countries_by_report = _country_percentages(db, report_ids)
     limits_by_fund = _representative_purchase_limits(db, funds)
-    stock_counts = report_row_counts(
-        db, ReportSecurityHolding, report_ids, basis="DIRECT"
-    )
+    stock_counts = report_row_counts(db, ReportSecurityHolding, report_ids, basis="DIRECT")
     fund_counts = report_row_counts(db, ReportFundHolding, report_ids, basis="DIRECT")
     lookthrough_country_counts = report_row_counts(
         db, ReportCountryAllocation, report_ids, basis="LOOKTHROUGH"
@@ -410,8 +435,13 @@ def _fund_summaries(db: Session, funds: list[FundContract]) -> list[FundSummaryR
                 representative_code=fund.representative_code,
                 strategy_type=fund.strategy_type,
                 original_category=fund.original_category,
+                research_scope=research_scope(
+                    fund.canonical_name,
+                    fund.original_category or "",
+                ),
                 wrapper_type=fund.wrapper_type,
                 tech_scope=metrics.tech_scope if metrics else fund.tech_scope,
+                is_portfolio_held=fund.id in held_fund_ids,
                 is_user_selected=fund.is_user_selected,
                 is_dependency=fund.is_dependency,
                 latest_report_id=report.id if report else None,
@@ -421,9 +451,7 @@ def _fund_summaries(db: Session, funds: list[FundContract]) -> list[FundSummaryR
                 stock_holding_count=stock_counts.get(report_id, 0),
                 fund_holding_count=fund_counts.get(report_id, 0),
                 lookthrough_status=lookthrough_status(
-                    status=(report.parse_status or "").strip().lower()
-                    if report
-                    else "unresolved",
+                    status=(report.parse_status or "").strip().lower() if report else "unresolved",
                     fund_holding_count=fund_counts.get(report_id, 0),
                     lookthrough_row_count=(
                         lookthrough_country_counts.get(report_id, 0)
@@ -720,6 +748,49 @@ def get_fund_today_estimate(
     return Q2FundAnalysisRead.model_validate(result.as_dict(include_series=False))
 
 
+def _run_portfolio_consistency_analysis(
+    db: Session,
+    *,
+    start_date: date,
+    as_of: date | None,
+    refresh_market_data: bool,
+) -> PortfolioAnalysisResult:
+    resolved_as_of = as_of or date.today()
+    try:
+        validate_analysis_dates(start_date, resolved_as_of)
+        targets = select_portfolio_active_funds(db)
+    except AnalysisScopeError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    with ProviderHttpClient() as http:
+        return analyze_portfolio(
+            db,
+            targets,
+            YahooChartMarketProvider(http),
+            start_date=start_date,
+            as_of=resolved_as_of,
+            refresh_market_data=refresh_market_data,
+        )
+
+
+@portfolio_router.get(
+    "/portfolio/consistency",
+    response_model=Q2PortfolioAnalysisRead,
+)
+def get_portfolio_consistency(
+    db: DbSession,
+    start_date: date = ANALYSIS_START_DATE,
+    as_of: date | None = None,
+    refresh_market_data: bool = False,
+) -> Q2PortfolioAnalysisRead:
+    analysis = _run_portfolio_consistency_analysis(
+        db,
+        start_date=start_date,
+        as_of=as_of,
+        refresh_market_data=refresh_market_data,
+    )
+    return Q2PortfolioAnalysisRead.model_validate(analysis.as_dict())
+
+
 @router.get("/fund-catalog/options", response_model=FundCatalogOptionsRead)
 def get_fund_catalog_options(provider: CatalogProvider) -> FundCatalogOptionsRead:
     try:
@@ -858,6 +929,34 @@ def _enqueue_data_operation(
 ) -> DataOperationRead:
     try:
         codes = _data_operation_inputs(db, request)
+        if (
+            operation == "sync-daily"
+            and not request.force
+            and not recurring_plans_pending(db, fund_codes=codes)
+        ):
+            for completed in db.scalars(
+                select(DataOperation)
+                .where(
+                    DataOperation.operation == "sync-daily",
+                    DataOperation.status == "succeeded",
+                )
+                .order_by(DataOperation.id.desc())
+                .limit(30)
+            ):
+                finished_at = completed.finished_at
+                if finished_at is None:
+                    continue
+                local_finished_at = (
+                    finished_at.astimezone(ZoneInfo("Asia/Shanghai"))
+                    if finished_at.tzinfo is not None
+                    else finished_at
+                )
+                if (
+                    local_finished_at.date() == datetime.now(ZoneInfo("Asia/Shanghai")).date()
+                    and tuple(completed.fund_codes) == codes
+                    and completed.lookback_days >= request.lookback_days
+                ):
+                    return _data_operation_response(completed)
         year, quarter = latest_completed_quarter()
         return _data_operation_response(
             enqueue_operation(
@@ -877,11 +976,20 @@ def _enqueue_data_operation(
 def get_data_preparation_status(db: DbSession) -> DataPreparationStatusRead:
     status = preparation_status(db)
     latest = latest_operation(db)
+    latest_daily = db.scalar(
+        select(DataOperation)
+        .where(DataOperation.operation == "sync-daily")
+        .order_by(DataOperation.id.desc())
+        .limit(1)
+    )
     active = latest if latest is not None and latest.status in {"queued", "running"} else None
     return DataPreparationStatusRead(
         **asdict(status),
         active_operation=active.operation if active is not None else None,
         latest_operation=(_data_operation_response(latest) if latest is not None else None),
+        latest_daily_operation=(
+            _data_operation_response(latest_daily) if latest_daily is not None else None
+        ),
     )
 
 
@@ -1079,59 +1187,25 @@ def _restore_portfolio_import_contract_states(
     db.commit()
 
 
-@portfolio_router.post(
-    "/portfolio/import/preview",
-    response_model=PortfolioImportPreviewRead,
-)
-def preview_portfolio_import(
-    request: PortfolioImportFileRequest,
-    db: DbSession,
-    provider: CatalogProvider,
-) -> PortfolioImportPreviewRead:
-    try:
-        workbook = parse_portfolio_workbook(_decode_portfolio_file(request))
-        preview = build_portfolio_preview(db, workbook, provider)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except (ProviderSchemaError, ProviderHttpError) as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    return PortfolioImportPreviewRead.model_validate(preview)
-
-
-@portfolio_router.post(
-    "/portfolio/import/confirm",
-    response_model=PortfolioImportResultRead,
-)
-def confirm_portfolio_import(
-    request: PortfolioImportConfirmRequest,
-    db: DbSession,
-    provider: CatalogProvider,
+def _commit_portfolio_workbook(
+    db: Session,
+    provider: FundCatalogProvider,
+    workbook: PortfolioWorkbook,
+    preview: dict[str, object],
 ) -> PortfolioImportResultRead:
-    try:
-        workbook = parse_portfolio_workbook(_decode_portfolio_file(request))
-        preview = build_portfolio_preview(db, workbook, provider)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except (ProviderSchemaError, ProviderHttpError) as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    if workbook.file_digest != request.file_digest:
-        raise HTTPException(status_code=409, detail="文件已变化，请重新预览后再确认")
-    if not preview["valid"]:
-        raise HTTPException(status_code=422, detail="文件校验未通过，请修正后重新预览")
-
     try:
         raw_root = raw_data_dir()
     except StoragePreflightError as error:
         raise HTTPException(status_code=503, detail=f"本地数据目录不可用：{error}") from error
 
-    positions = preview["positions"]
+    positions = cast(list[dict[str, object]], preview["positions"])
     affected_codes = {str(item["share_code"]) for item in positions}
     prior_contract_states = _portfolio_import_contract_states(db)
     add_codes = tuple(
-        sorted({item["share_code"] for item in positions if item["universe_action"] == "ADD"})
+        sorted({str(item["share_code"]) for item in positions if item["universe_action"] == "ADD"})
     )
     restore_codes = sorted(
-        {item["share_code"] for item in positions if item["universe_action"] == "RESTORE"}
+        {str(item["share_code"]) for item in positions if item["universe_action"] == "RESTORE"}
     )
     imported_codes: list[str] = []
     missing_nav: set[str] = set()
@@ -1173,9 +1247,7 @@ def confirm_portfolio_import(
                         page_size=EastmoneyNavProvider.max_page_size,
                     )
             except Exception as error:
-                raise HTTPException(
-                    status_code=502, detail=f"补充基金净值失败：{error}"
-                ) from error
+                raise HTTPException(status_code=502, detail=f"补充基金净值失败：{error}") from error
             still_missing = anchor_missing_codes(db, workbook)
             if still_missing:
                 raise HTTPException(
@@ -1203,6 +1275,155 @@ def confirm_portfolio_import(
     )
 
 
+@portfolio_router.post(
+    "/portfolio/import/preview",
+    response_model=PortfolioImportPreviewRead,
+)
+def preview_portfolio_import(
+    request: PortfolioImportFileRequest,
+    db: DbSession,
+    provider: CatalogProvider,
+) -> PortfolioImportPreviewRead:
+    try:
+        workbook = parse_portfolio_workbook(_decode_portfolio_file(request))
+        preview = build_portfolio_preview(db, workbook, provider)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ProviderSchemaError, ProviderHttpError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return PortfolioImportPreviewRead.model_validate(preview)
+
+
+@portfolio_router.post(
+    "/portfolio/import/confirm",
+    response_model=PortfolioImportResultRead,
+)
+def confirm_portfolio_import(
+    request: PortfolioImportConfirmRequest,
+    db: DbSession,
+    provider: CatalogProvider,
+) -> PortfolioImportResultRead:
+    try:
+        workbook = parse_portfolio_workbook(_decode_portfolio_file(request))
+        preview = build_portfolio_preview(db, workbook, provider)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ProviderSchemaError, ProviderHttpError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if workbook.file_digest != request.file_digest:
+        raise HTTPException(status_code=409, detail="文件已变化，请重新预览后再确认")
+    if not preview["valid"]:
+        raise HTTPException(status_code=422, detail="文件校验未通过，请修正后重新预览")
+    return _commit_portfolio_workbook(db, provider, workbook, preview)
+
+
+def _manual_position_payload(
+    request: PortfolioPositionEditableWrite,
+    *,
+    share_code: str,
+    platform: str,
+    currency: str | None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "share_code": share_code,
+        "platform": platform.strip(),
+        "snapshot_date": request.snapshot_date,
+        "currency": currency,
+        "units": str(request.units),
+        "market_value": str(request.market_value),
+        "holding_profit": str(request.holding_profit),
+        "holding_return_pct": str(request.holding_return_pct),
+        "cumulative_profit": (
+            str(request.cumulative_profit) if request.cumulative_profit is not None else None
+        ),
+        "purchase_fee_pct": (
+            str(request.purchase_fee_pct) if request.purchase_fee_pct is not None else None
+        ),
+        "management_fee_pct_annual": (
+            str(request.management_fee_pct_annual)
+            if request.management_fee_pct_annual is not None
+            else None
+        ),
+        "custody_fee_pct_annual": (
+            str(request.custody_fee_pct_annual)
+            if request.custody_fee_pct_annual is not None
+            else None
+        ),
+        "active": True,
+    }
+    if request.recurring_plan is not None:
+        payload["recurring_plan"] = {
+            "frequency": "DAILY",
+            "gross_amount": str(request.recurring_plan.gross_amount),
+            "fee_pct": str(request.recurring_plan.fee_pct),
+            "confirmation_lag_days": request.recurring_plan.confirmation_lag_days,
+        }
+    return payload
+
+
+def _manual_position_workbook(payload: dict[str, object]) -> PortfolioWorkbook:
+    identity = (str(payload["platform"]), str(payload["share_code"]))
+    return PortfolioWorkbook(
+        file_digest="0" * 64,
+        payload={"positions": [payload]},
+        position_rows={identity: 1},
+        errors=(),
+    )
+
+
+def _commit_manual_position(
+    db: Session,
+    provider: FundCatalogProvider,
+    payload: dict[str, object],
+) -> PortfolioImportResultRead:
+    workbook = _manual_position_workbook(payload)
+    preview = build_portfolio_preview(db, workbook, provider)
+    if not preview["valid"]:
+        messages = "；".join(str(item["message"]) for item in preview["errors"])
+        raise HTTPException(status_code=422, detail=messages or "持仓校验未通过")
+    return _commit_portfolio_workbook(db, provider, workbook, preview)
+
+
+@portfolio_router.post(
+    "/portfolio/positions",
+    response_model=PortfolioImportResultRead,
+)
+def create_portfolio_position(
+    request: PortfolioPositionCreateRequest,
+    db: DbSession,
+    provider: CatalogProvider,
+) -> PortfolioImportResultRead:
+    payload = _manual_position_payload(
+        request,
+        share_code=request.share_code,
+        platform=request.platform,
+        currency=None,
+    )
+    return _commit_manual_position(db, provider, payload)
+
+
+@portfolio_router.post(
+    "/portfolio/positions/{position_id}",
+    response_model=PortfolioImportResultRead,
+)
+def update_portfolio_position(
+    position_id: int,
+    request: PortfolioPositionUpdateRequest,
+    db: DbSession,
+    provider: CatalogProvider,
+) -> PortfolioImportResultRead:
+    position = db.get(PortfolioPosition, position_id)
+    if position is None or not position.is_active:
+        raise HTTPException(status_code=404, detail="持仓不存在或已停用")
+    payload = _manual_position_payload(
+        request,
+        share_code=position.fund_share.share_code,
+        platform=position.platform,
+        currency=position.currency,
+    )
+    return _commit_manual_position(db, provider, payload)
+
+
 @portfolio_router.get("/portfolio", response_model=PortfolioRead)
 def get_portfolio(db: DbSession) -> PortfolioRead:
     positions = list(
@@ -1226,7 +1447,9 @@ def get_portfolio(db: DbSession) -> PortfolioRead:
         .where(DailyFundNav.fund_share_id.in_(share_ids))
         .order_by(DailyFundNav.fund_share_id, DailyFundNav.nav_date.desc(), DailyFundNav.id.desc())
     ).all():
-        if len(navs_by_share[nav.fund_share_id]) < 2:
+        if len(navs_by_share[nav.fund_share_id]) < 2 and all(
+            existing.nav_date != nav.nav_date for existing in navs_by_share[nav.fund_share_id]
+        ):
             navs_by_share[nav.fund_share_id].append(nav)
     fees_by_share: dict[int, DailyFundFee] = {}
     for fee_row in db.scalars(
@@ -1268,6 +1491,11 @@ def get_portfolio(db: DbSession) -> PortfolioRead:
             "daily_profit_count": 0,
             "recurring_gross_amount": Decimal("0"),
             "recurring_net_amount": Decimal("0"),
+            "recurring_execution_count": 0,
+            "recurring_invested_gross_amount": Decimal("0"),
+            "recurring_invested_net_amount": Decimal("0"),
+            "recurring_pending_order_count": 0,
+            "recurring_pending_gross_amount": Decimal("0"),
         }
     )
     for position in positions:
@@ -1282,35 +1510,62 @@ def get_portfolio(db: DbSession) -> PortfolioRead:
                 if nav_rows[0].published_daily_return_pct is not None
                 else nav_rows[0].calculated_daily_return_pct
             )
-        units = (position.reported_market_value / position.anchor_unit_nav).quantize(
-            QUANTITY_SCALE, rounding=ROUND_HALF_UP
+        base_units = position.reported_units
+        executions = sorted(position.recurring_executions, key=lambda item: item.nav_date)
+        recurring_units = sum((execution.units for execution in executions), start=Decimal("0"))
+        recurring_invested_gross = sum(
+            (execution.gross_amount for execution in executions), start=Decimal("0")
         )
-        nav_ratio = latest_unit_nav / position.anchor_unit_nav
-        estimated_market = _money(units * latest_unit_nav)
+        recurring_invested_net = sum(
+            (execution.net_amount for execution in executions), start=Decimal("0")
+        )
+        recurring_orders = sorted(
+            position.recurring_orders,
+            key=lambda item: (item.order_date, item.id),
+        )
+        pending_orders = [order for order in recurring_orders if order.status == "PENDING"]
+        recurring_pending_gross = sum(
+            (order.gross_amount for order in pending_orders), start=Decimal("0")
+        )
+        units = base_units + recurring_units
+        base_nav_change = _money(
+            base_units * (latest_unit_nav - position.anchor_unit_nav)
+        )
+        recurring_market = _money(recurring_units * latest_unit_nav)
+        estimated_market = _money(
+            position.reported_market_value + base_nav_change + recurring_market
+        )
         change = _money(estimated_market - position.reported_market_value)
-        estimated_profit = _money(position.reported_profit_amount + change)
-        estimated_return = (
-            (Decimal("1") + position.reported_return_pct / Decimal("100")) * nav_ratio
-            - Decimal("1")
-        ) * Decimal("100")
+        base_change = base_nav_change
+        recurring_profit = _money(recurring_market - recurring_invested_gross)
+        base_profit = _money(position.reported_profit_amount + base_change)
+        estimated_profit = _money(base_profit + recurring_profit)
+        base_cost_basis = _portfolio_snapshot_cost_basis(position)
+        estimated_cost_basis = (
+            base_cost_basis + recurring_invested_gross
+            if base_cost_basis is not None
+            else None
+        )
+        if base_change == 0 and recurring_invested_gross == 0:
+            estimated_return = position.reported_return_pct
+        elif estimated_cost_basis is not None and estimated_cost_basis > 0:
+            estimated_return = estimated_profit * Decimal("100") / estimated_cost_basis
+        else:
+            estimated_return = position.reported_return_pct
         estimated_cumulative = (
-            _money(position.reported_cumulative_profit_amount + change)
+            _money(position.reported_cumulative_profit_amount + base_change + recurring_profit)
             if position.reported_cumulative_profit_amount is not None
             else None
         )
+        daily_units = base_units + sum(
+            (execution.units for execution in executions if execution.nav_date < latest_nav_date),
+            start=Decimal("0"),
+        )
         daily_profit = (
-            _money(units * (latest_unit_nav - previous_unit_nav))
+            _money(daily_units * (latest_unit_nav - previous_unit_nav))
             if previous_unit_nav is not None
             else None
         )
-        estimated_cost_basis = None
-        if estimated_return == 0:
-            if estimated_profit == 0:
-                estimated_cost_basis = estimated_market
-        else:
-            implied_cost = estimated_profit * Decimal("100") / estimated_return
-            if implied_cost > 0:
-                estimated_cost_basis = implied_cost
         conversion_rate = (
             Decimal("1")
             if position.currency == "CNY"
@@ -1375,7 +1630,9 @@ def get_portfolio(db: DbSession) -> PortfolioRead:
                 fee_pct=position.recurring_fee_pct,
                 net_amount=position.recurring_net_amount,
                 currency=position.currency,
+                confirmation_lag_days=position.recurring_confirmation_lag_days,
             )
+        latest_recurring_order = recurring_orders[-1] if recurring_orders else None
         cash_flows = sorted(
             position.cash_flows,
             key=lambda item: (item.occurred_on or date(item.occurred_year, 1, 1), item.id),
@@ -1386,10 +1643,12 @@ def get_portfolio(db: DbSession) -> PortfolioRead:
                 fund_id=position.fund_share.fund_contract_id,
                 canonical_name=position.fund_share.fund_contract.canonical_name,
                 manager_name=position.fund_share.fund_contract.manager_name,
+                representative_code=position.fund_share.fund_contract.representative_code,
                 share_code=position.fund_share.share_code,
                 platform=position.platform,
                 currency=position.currency,
                 snapshot_date=position.snapshot_date,
+                reported_units=position.reported_units,
                 reported_market_value=position.reported_market_value,
                 reported_profit_amount=position.reported_profit_amount,
                 reported_return_pct=position.reported_return_pct,
@@ -1414,6 +1673,37 @@ def get_portfolio(db: DbSession) -> PortfolioRead:
                 ),
                 cash_flows=[PortfolioCashFlowRead.model_validate(flow) for flow in cash_flows],
                 recurring_plan=recurring_plan,
+                recurring_execution_count=len(executions),
+                recurring_invested_gross_amount=_money(recurring_invested_gross),
+                recurring_invested_net_amount=_money(recurring_invested_net),
+                last_recurring_nav_date=(executions[-1].nav_date if executions else None),
+                recurring_pending_order_count=len(pending_orders),
+                recurring_pending_gross_amount=_money(recurring_pending_gross),
+                latest_recurring_order=(
+                    PortfolioRecurringOrderRead(
+                        status=cast(
+                            Literal["PENDING", "SETTLED"],
+                            latest_recurring_order.status,
+                        ),
+                        order_date=latest_recurring_order.order_date,
+                        expected_confirmation_date=(
+                            latest_recurring_order.expected_confirmation_date
+                        ),
+                        gross_amount=latest_recurring_order.gross_amount,
+                        net_amount=latest_recurring_order.net_amount,
+                        settled_nav_date=(
+                            latest_recurring_order.settled_execution.nav_date
+                            if latest_recurring_order.settled_execution is not None
+                            else None
+                        ),
+                        confirmed_at=latest_recurring_order.confirmed_at,
+                    )
+                    if latest_recurring_order is not None
+                    else None
+                ),
+                manual_purchase_fee_pct=position.manual_purchase_fee_pct,
+                manual_management_fee_pct_annual=(position.manual_management_fee_pct_annual),
+                manual_custody_fee_pct_annual=position.manual_custody_fee_pct_annual,
                 fees=PortfolioFeeRead(
                     platform_purchase_fee_pct=position.manual_purchase_fee_pct,
                     standard_purchase_fee_pct=(
@@ -1459,6 +1749,22 @@ def get_portfolio(db: DbSession) -> PortfolioRead:
             summary["recurring_net_amount"] = (
                 Decimal(summary["recurring_net_amount"] or 0) + recurring_plan.net_amount
             )
+        summary["recurring_execution_count"] = int(summary["recurring_execution_count"] or 0) + len(
+            executions
+        )
+        summary["recurring_invested_gross_amount"] = (
+            Decimal(summary["recurring_invested_gross_amount"] or 0) + recurring_invested_gross
+        )
+        summary["recurring_invested_net_amount"] = (
+            Decimal(summary["recurring_invested_net_amount"] or 0) + recurring_invested_net
+        )
+        summary["recurring_pending_order_count"] = int(
+            summary["recurring_pending_order_count"] or 0
+        ) + len(pending_orders)
+        summary["recurring_pending_gross_amount"] = (
+            Decimal(summary["recurring_pending_gross_amount"] or 0)
+            + recurring_pending_gross
+        )
 
     currency_summaries: list[PortfolioCurrencySummaryRead] = []
     for currency, summary in sorted(summaries.items()):
@@ -1493,6 +1799,19 @@ def get_portfolio(db: DbSession) -> PortfolioRead:
                 recurring_net_amount=_money(recurring_net),
                 recurring_net_pct=(
                     _ratio_pct(recurring_net, recurring_gross) if recurring_gross > 0 else None
+                ),
+                recurring_execution_count=int(summary["recurring_execution_count"] or 0),
+                recurring_invested_gross_amount=_money(
+                    Decimal(summary["recurring_invested_gross_amount"] or 0)
+                ),
+                recurring_invested_net_amount=_money(
+                    Decimal(summary["recurring_invested_net_amount"] or 0)
+                ),
+                recurring_pending_order_count=int(
+                    summary["recurring_pending_order_count"] or 0
+                ),
+                recurring_pending_gross_amount=_money(
+                    Decimal(summary["recurring_pending_gross_amount"] or 0)
                 ),
             )
         )
@@ -1533,6 +1852,26 @@ def get_portfolio(db: DbSession) -> PortfolioRead:
 
 def _money(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def _portfolio_snapshot_cost_basis(position: PortfolioPosition) -> Decimal | None:
+    """Keep the platform-reported snapshot cost basis fixed across NAV days."""
+
+    ordinary_cost = position.reported_market_value - position.reported_profit_amount
+    platform_cost: Decimal | None = None
+    if position.reported_return_pct != 0:
+        candidate = (
+            position.reported_profit_amount
+            * Decimal("100")
+            / position.reported_return_pct
+        )
+        if candidate > 0:
+            platform_cost = candidate
+    if platform_cost is not None:
+        return platform_cost
+    if ordinary_cost > 0:
+        return ordinary_cost
+    return platform_cost
 
 
 def _ratio_pct(numerator: Decimal, denominator: Decimal) -> Decimal | None:

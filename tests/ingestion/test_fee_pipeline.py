@@ -80,6 +80,7 @@ def test_sync_portfolio_fees_archives_and_writes_daily_snapshot(
             platform="测试平台",
             snapshot_date=date(2026, 8, 1),
             currency="CNY",
+            reported_units=Decimal("10000"),
             reported_market_value=Decimal("10000"),
             reported_profit_amount=Decimal("1000"),
             reported_return_pct=Decimal("10"),

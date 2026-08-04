@@ -740,6 +740,7 @@ class PortfolioPosition(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("platform", "fund_share_id", name="uq_portfolio_position_platform_share"),
         CheckConstraint("length(trim(platform)) > 0", name="platform_nonempty"),
+        CheckConstraint("reported_units > 0", name="reported_units_positive"),
         CheckConstraint("reported_market_value > 0", name="market_value_positive"),
         CheckConstraint("anchor_unit_nav > 0", name="anchor_unit_nav_positive"),
         CheckConstraint(
@@ -761,6 +762,10 @@ class PortfolioPosition(TimestampMixin, Base):
         CheckConstraint(
             "recurring_net_amount IS NULL OR recurring_net_amount > 0",
             name="recurring_net_amount_positive",
+        ),
+        CheckConstraint(
+            "recurring_confirmation_lag_days BETWEEN 0 AND 10",
+            name="recurring_confirmation_lag_days_range",
         ),
         CheckConstraint(
             "manual_purchase_fee_pct IS NULL OR manual_purchase_fee_pct BETWEEN 0 AND 100",
@@ -785,6 +790,7 @@ class PortfolioPosition(TimestampMixin, Base):
     platform: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    reported_units: Mapped[Decimal] = mapped_column(QUANTITY, nullable=False)
     reported_market_value: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     reported_profit_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     reported_return_pct: Mapped[Decimal] = mapped_column(PERCENT, nullable=False)
@@ -795,6 +801,9 @@ class PortfolioPosition(TimestampMixin, Base):
     recurring_gross_amount: Mapped[Decimal | None] = mapped_column(MONEY)
     recurring_fee_pct: Mapped[Decimal | None] = mapped_column(PERCENT)
     recurring_net_amount: Mapped[Decimal | None] = mapped_column(MONEY)
+    recurring_confirmation_lag_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default="2"
+    )
     manual_purchase_fee_pct: Mapped[Decimal | None] = mapped_column(PERCENT)
     manual_management_fee_pct_annual: Mapped[Decimal | None] = mapped_column(PERCENT)
     manual_custody_fee_pct_annual: Mapped[Decimal | None] = mapped_column(PERCENT)
@@ -808,6 +817,12 @@ class PortfolioPosition(TimestampMixin, Base):
 
     fund_share: Mapped[FundShare] = relationship(back_populates="portfolio_positions")
     cash_flows: Mapped[list[PortfolioCashFlow]] = relationship(
+        back_populates="portfolio_position", cascade="all, delete-orphan"
+    )
+    recurring_executions: Mapped[list[PortfolioRecurringExecution]] = relationship(
+        back_populates="portfolio_position", cascade="all, delete-orphan"
+    )
+    recurring_orders: Mapped[list[PortfolioRecurringOrder]] = relationship(
         back_populates="portfolio_position", cascade="all, delete-orphan"
     )
 
@@ -841,6 +856,96 @@ class PortfolioCashFlow(TimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text)
 
     portfolio_position: Mapped[PortfolioPosition] = relationship(back_populates="cash_flows")
+
+
+class PortfolioRecurringExecution(TimestampMixin, Base):
+    """One idempotent recurring investment settled at a source-backed NAV."""
+
+    __tablename__ = "portfolio_recurring_execution"
+    __table_args__ = (
+        UniqueConstraint(
+            "portfolio_position_id",
+            "nav_date",
+            name="uq_portfolio_recurring_execution_position_nav_date",
+        ),
+        CheckConstraint("unit_nav > 0", name="unit_nav_positive"),
+        CheckConstraint("gross_amount > 0", name="gross_amount_positive"),
+        CheckConstraint("fee_pct BETWEEN 0 AND 100", name="fee_range"),
+        CheckConstraint("net_amount > 0", name="net_amount_positive"),
+        CheckConstraint("units > 0", name="units_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    portfolio_position_id: Mapped[int] = mapped_column(
+        ForeignKey("portfolio_position.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    nav_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    unit_nav: Mapped[Decimal] = mapped_column(PRICE, nullable=False)
+    gross_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    fee_pct: Mapped[Decimal] = mapped_column(PERCENT, nullable=False)
+    net_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    units: Mapped[Decimal] = mapped_column(QUANTITY, nullable=False)
+    source_provider: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    portfolio_position: Mapped[PortfolioPosition] = relationship(
+        back_populates="recurring_executions"
+    )
+
+
+class PortfolioRecurringOrder(TimestampMixin, Base):
+    """A user-triggered recurring order waiting for its source-backed valuation NAV."""
+
+    __tablename__ = "portfolio_recurring_order"
+    __table_args__ = (
+        UniqueConstraint(
+            "portfolio_position_id",
+            "order_date",
+            name="uq_portfolio_recurring_order_position_order_date",
+        ),
+        UniqueConstraint(
+            "settled_execution_id",
+            name="uq_portfolio_recurring_order_settled_execution",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING', 'SETTLED')",
+            name="status_allowed",
+        ),
+        CheckConstraint("gross_amount > 0", name="gross_amount_positive"),
+        CheckConstraint("fee_pct BETWEEN 0 AND 100", name="fee_range"),
+        CheckConstraint("net_amount > 0", name="net_amount_positive"),
+        CheckConstraint(
+            "expected_confirmation_date >= order_date",
+            name="expected_confirmation_not_before_order",
+        ),
+        CheckConstraint(
+            "(status = 'PENDING' AND settled_execution_id IS NULL AND confirmed_at IS NULL) OR "
+            "(status = 'SETTLED' AND settled_execution_id IS NOT NULL "
+            "AND confirmed_at IS NOT NULL)",
+            name="settlement_state_complete",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    portfolio_position_id: Mapped[int] = mapped_column(
+        ForeignKey("portfolio_position.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    order_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    expected_confirmation_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="PENDING", server_default="PENDING", index=True
+    )
+    gross_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    fee_pct: Mapped[Decimal] = mapped_column(PERCENT, nullable=False)
+    net_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    settled_execution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("portfolio_recurring_execution.id", ondelete="SET NULL"), index=True
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    portfolio_position: Mapped[PortfolioPosition] = relationship(
+        back_populates="recurring_orders"
+    )
+    settled_execution: Mapped[PortfolioRecurringExecution | None] = relationship()
 
 
 class DailyExchangeRate(Base):
@@ -924,7 +1029,7 @@ class DataOperation(TimestampMixin, Base):
             "(status IN ('succeeded', 'partial', 'failed') AND active_slot IS NULL)",
             name="active_slot_matches_status",
         ),
-        CheckConstraint("lookback_days BETWEEN 1 AND 30", name="lookback_days_range"),
+        CheckConstraint("lookback_days BETWEEN 1 AND 100", name="lookback_days_range"),
         CheckConstraint(
             "report_quarter IS NULL OR report_quarter BETWEEN 1 AND 4",
             name="report_quarter_range",
@@ -955,6 +1060,19 @@ class DataOperation(TimestampMixin, Base):
     records_failed: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    recurring_orders_created: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    recurring_orders_settled: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    recurring_executions_written: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    recurring_positions_updated: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    recurring_latest_nav_date: Mapped[date | None] = mapped_column(Date)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_message: Mapped[str | None] = mapped_column(Text)
