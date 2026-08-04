@@ -293,6 +293,16 @@ def test_active_tech_regions_aggregates_basis_and_reports_missing_coverage(
                     source_section="国家分布",
                     raw_row={},
                 ),
+                ReportCountryAllocation(
+                    fund_report_id=report.id,
+                    country_name_raw="中国台湾",
+                    country_name_normalized="TW",
+                    exposure_basis=basis,
+                    nav_pct=Decimal("5"),
+                    rank=3,
+                    source_section="国家分布",
+                    raw_row={},
+                ),
             ]
         )
     db_session.commit()
@@ -311,7 +321,31 @@ def test_active_tech_regions_aggregates_basis_and_reports_missing_coverage(
     ]
     assert payload["average_distribution"][:2] == [
         {"country": "美国", "average_nav_pct": "70.00000000", "covered_fund_count": 1},
-        {"country": "中国香港", "average_nav_pct": "15.00000000", "covered_fund_count": 1},
+        {"country": "日本", "average_nav_pct": "0", "covered_fund_count": 0},
+    ]
+    assert payload["average_distribution"][3] == {
+        "country": "中国香港",
+        "average_nav_pct": "15.00000000",
+        "covered_fund_count": 1,
+    }
+    assert payload["average_distribution"][-2] == {
+        "country": "其他分类",
+        "average_nav_pct": "5.00000000",
+        "covered_fund_count": 1,
+    }
+    assert payload["average_distribution"][-1] == {
+        "country": "未披露",
+        "average_nav_pct": "10.00000000",
+        "covered_fund_count": 1,
+    }
+    assert [item["country"] for item in payload["funds"][0]["allocations"]] == [
+        "美国",
+        "日本",
+        "韩国",
+        "中国香港",
+        "中国内地",
+        "其他分类",
+        "未披露",
     ]
     assert payload["missing"][0]["reason"] == "MISSING_REPORT"
 

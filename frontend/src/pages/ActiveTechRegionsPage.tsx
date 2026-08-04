@@ -22,7 +22,17 @@ import { StatusBadge } from '../components/StatusBadge'
 import { exportDashboardPng } from '../lib/exportDashboardPng'
 import { formatDate, formatPercent, toNumber } from '../lib/format'
 
-const palette = ['#24364b', '#e76f51', '#268a7b', '#c69136', '#846c9b']
+const regionOrder = ['美国', '日本', '韩国', '中国香港', '中国内地', '其他分类', '未披露'] as const
+const fundSortPriority = ['美国', '韩国', '日本', '中国香港', '中国内地'] as const
+const regionColors: Record<(typeof regionOrder)[number], string> = {
+  美国: '#24364b',
+  日本: '#ffffff',
+  韩国: '#171717',
+  中国香港: '#9e1b64',
+  中国内地: '#d43f3a',
+  其他分类: '#5f6872',
+  未披露: '#d9dde2',
+}
 
 const missingReasonLabels = {
   MISSING_REPORT: '缺少季度报告',
@@ -31,14 +41,19 @@ const missingReasonLabels = {
 }
 
 function stackedRegionOption(payload: ActiveTechRegionsPayload): EChartsOption {
-  const countries = payload.average_distribution.slice(0, 4).map((item) => item.country)
-  const seriesNames = [...countries, '其他已披露']
-  const funds = [...payload.funds].sort((left, right) =>
-    (toNumber(right.disclosed_country_pct) ?? 0) - (toNumber(left.disclosed_country_pct) ?? 0),
-  )
+  function allocation(fund: ActiveTechRegionsPayload['funds'][number], country: string) {
+    return toNumber(fund.allocations.find((item) => item.country === country)?.nav_pct) ?? 0
+  }
+
+  const funds = [...payload.funds].sort((left, right) => {
+    for (const country of fundSortPriority) {
+      const difference = allocation(right, country) - allocation(left, country)
+      if (difference !== 0) return difference
+    }
+    return left.representative_code.localeCompare(right.representative_code)
+  })
   return {
-    color: palette,
-    grid: { top: 48, right: 28, bottom: 34, left: 98 },
+    grid: { top: 48, right: 28, bottom: 34, left: 286 },
     legend: { top: 0, left: 0, textStyle: { color: '#56616f', fontSize: 11 } },
     tooltip: {
       trigger: 'axis',
@@ -53,32 +68,42 @@ function stackedRegionOption(payload: ActiveTechRegionsPayload): EChartsOption {
     },
     yAxis: {
       type: 'category',
-      data: funds.map((fund) => fund.representative_code),
+      inverse: true,
+      data: funds.map((fund) => `${fund.fund_name}\n${fund.representative_code}`),
       axisTick: { show: false },
       axisLine: { show: false },
-      axisLabel: { color: '#303944', fontFamily: 'monospace' },
+      axisLabel: {
+        color: '#303944',
+        fontSize: 10,
+        lineHeight: 15,
+        width: 246,
+        overflow: 'truncate',
+      },
     },
-    series: seriesNames.map((country) => ({
+    series: regionOrder.map((country) => ({
       name: country,
       type: 'bar',
       stack: 'region',
-      barMaxWidth: 16,
-      data: funds.map((fund) => {
-        if (country === '其他已披露') {
-          return fund.allocations
-            .filter((item) => !countries.includes(item.country))
-            .reduce((total, item) => total + (toNumber(item.nav_pct) ?? 0), 0)
-        }
-        return toNumber(fund.allocations.find((item) => item.country === country)?.nav_pct) ?? 0
-      }),
+      barMaxWidth: 18,
+      itemStyle: {
+        color: regionColors[country],
+        borderColor: country === '日本' ? '#8a949e' : regionColors[country],
+        borderWidth: country === '日本' ? 1 : 0,
+      },
+      data: funds.map((fund) => allocation(fund, country)),
     })),
   }
 }
 
 function averageRegionOption(payload: ActiveTechRegionsPayload): EChartsOption {
-  const items = payload.average_distribution.slice(0, 10).reverse()
+  const items = regionOrder.map((country) => ({
+    country,
+    value: toNumber(
+      payload.average_distribution.find((item) => item.country === country)?.average_nav_pct,
+    ) ?? 0,
+  }))
   return {
-    grid: { top: 16, right: 28, bottom: 28, left: 112 },
+    grid: { top: 16, right: 36, bottom: 28, left: 112 },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (value) => `${Number(value).toFixed(2)}%` },
     xAxis: {
       type: 'value',
@@ -87,6 +112,7 @@ function averageRegionOption(payload: ActiveTechRegionsPayload): EChartsOption {
     },
     yAxis: {
       type: 'category',
+      inverse: true,
       data: items.map((item) => item.country),
       axisTick: { show: false },
       axisLine: { show: false },
@@ -95,7 +121,14 @@ function averageRegionOption(payload: ActiveTechRegionsPayload): EChartsOption {
     series: [{
       type: 'bar',
       barMaxWidth: 18,
-      data: items.map((item) => ({ value: toNumber(item.average_nav_pct), itemStyle: { color: '#24364b' } })),
+      data: items.map((item) => ({
+        value: item.value,
+        itemStyle: {
+          color: regionColors[item.country],
+          borderColor: item.country === '日本' ? '#8a949e' : regionColors[item.country],
+          borderWidth: item.country === '日本' ? 1 : 0,
+        },
+      })),
       label: { show: true, position: 'right', color: '#56616f', formatter: ({ value }: { value: unknown }) => `${Number(value).toFixed(1)}%` },
     }],
   }
@@ -171,7 +204,7 @@ export function ActiveTechRegionsPage() {
         <div>
           <span className="eyebrow"><MapPinned size={14} />QUARTERLY REGIONS</span>
           <h1>主动科技 QDII 地区看板</h1>
-          <p>按正式季度报告聚合地区暴露；直接披露与穿透结果分开呈现，不把缺失权重补成 100%。</p>
+          <p>按正式季度报告聚合地区暴露；直接披露与穿透结果分开呈现，已覆盖基金的未披露权重单独列示。</p>
         </div>
         <div className="dashboard-actions">
           <button className="button button-primary dashboard-export-button" type="button" onClick={exportPng} disabled={!query.data || exportState === 'EXPORTING'}><Download size={16} />{exportState === 'EXPORTING' ? '生成中…' : '导出整页 PNG'}</button>
@@ -205,15 +238,15 @@ export function ActiveTechRegionsPage() {
           </section>
 
           <section className="panel dashboard-chart-panel" aria-labelledby="region-stack-title">
-            <div className="panel-heading"><div><span className="section-kicker">FUND COMPOSITION</span><h2 id="region-stack-title">基金地区构成</h2><p>前四大平均地区单列，其余已披露地区合并；横轴固定为净值占比 0–100%。</p></div><span className="panel-caption">{basis === 'DIRECT' ? '直接披露' : '穿透口径'}</span></div>
+            <div className="panel-heading"><div><span className="section-kicker">FUND COMPOSITION</span><h2 id="region-stack-title">基金地区构成</h2><p>固定展示美国、日本、韩国、中国香港、中国内地、其他分类和未披露；按美国、韩国、日本、香港、内地占比依次降序。</p></div><span className="panel-caption">{basis === 'DIRECT' ? '直接披露' : '穿透口径'}</span></div>
             {query.data.funds.length > 0
-              ? <EChart option={stackedOption} height={Math.min(820, Math.max(360, query.data.funds.length * 25 + 90))} ariaLabel="基金地区构成堆叠图" />
+              ? <EChart option={stackedOption} height={Math.min(1200, Math.max(420, query.data.funds.length * 40 + 110))} ariaLabel="基金地区构成堆叠图" />
               : <EmptyPanel compact title="没有地区构成数据" detail="先同步并解析对应季度报告。" />}
           </section>
 
           <section className="dashboard-two-column">
             <section className="panel dashboard-chart-panel" aria-labelledby="region-average-title">
-              <div className="panel-heading"><div><span className="section-kicker">POOL AVERAGE</span><h2 id="region-average-title">基金池平均地区分布</h2><p>分母为有地区数据的基金，不对单只基金缺失权重补齐。</p></div></div>
+              <div className="panel-heading"><div><span className="section-kicker">POOL AVERAGE</span><h2 id="region-average-title">基金池平均地区分布</h2><p>分母为有地区数据的基金；完全缺失地区明细的基金不参与平均。</p></div></div>
               {query.data.average_distribution.length > 0
                 ? <EChart option={averageOption} height={390} ariaLabel="基金池平均地区分布条形图" />
                 : <EmptyPanel compact />}

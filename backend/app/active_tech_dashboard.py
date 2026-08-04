@@ -73,6 +73,16 @@ COUNTRY_LABELS = {
     "台湾": "中国台湾",
     "中国台湾": "中国台湾",
 }
+REGION_CATEGORIES = (
+    "美国",
+    "日本",
+    "韩国",
+    "中国香港",
+    "中国内地",
+    "其他分类",
+    "未披露",
+)
+PRIMARY_REGIONS = frozenset(REGION_CATEGORIES[:5])
 
 
 def _pool_codes(pool: DashboardPool) -> tuple[str, ...]:
@@ -300,6 +310,11 @@ def _country_label(value: str) -> str:
     return COUNTRY_LABELS.get(normalized.upper(), normalized)
 
 
+def _dashboard_region(value: str) -> str:
+    label = _country_label(value)
+    return label if label in PRIMARY_REGIONS else "其他分类"
+
+
 def active_tech_regions(
     db: Session,
     *,
@@ -342,9 +357,8 @@ def active_tech_regions(
     ) if report_ids else []
     allocations_by_report: dict[int, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
     for row in rows:
-        allocations_by_report[row.fund_report_id][_country_label(row.country_name_normalized)] += (
-            row.nav_pct or Decimal("0")
-        )
+        country = _dashboard_region(row.country_name_normalized)
+        allocations_by_report[row.fund_report_id][country] += row.nav_pct or Decimal("0")
 
     covered: list[ActiveTechRegionFundRead] = []
     missing: list[ActiveTechRegionMissingRead] = []
@@ -382,9 +396,17 @@ def active_tech_regions(
                 )
             )
             continue
+        disclosed_country_pct = sum(allocations.values(), Decimal("0"))
+        undisclosed_pct = max(Decimal("0"), Decimal("100") - disclosed_country_pct)
+        grouped_allocations = {
+            country: (
+                undisclosed_pct if country == "未披露" else allocations.get(country, Decimal("0"))
+            )
+            for country in REGION_CATEGORIES
+        }
         items = [
-            ActiveTechRegionItemRead(country=country, nav_pct=value)
-            for country, value in sorted(allocations.items(), key=lambda item: (-item[1], item[0]))
+            ActiveTechRegionItemRead(country=country, nav_pct=grouped_allocations[country])
+            for country in REGION_CATEGORIES
         ]
         for item in items:
             country_totals[item.country] += item.nav_pct
@@ -399,7 +421,7 @@ def active_tech_regions(
                 report_id=report.id,
                 report_period_end=report.period_end,
                 parse_confidence=report.parse_confidence,
-                disclosed_country_pct=sum((item.nav_pct for item in items), Decimal("0")),
+                disclosed_country_pct=disclosed_country_pct,
                 allocations=items,
             )
         )
@@ -410,11 +432,13 @@ def active_tech_regions(
             country=country,
             average_nav_pct=total / denominator,
             covered_fund_count=sum(
-                any(item.country == country for item in fund.allocations) for fund in covered
+                any(item.country == country and item.nav_pct > 0 for item in fund.allocations)
+                for fund in covered
             ),
         )
-        for country, total in sorted(country_totals.items(), key=lambda item: (-item[1], item[0]))
+        for country in REGION_CATEGORIES
         if denominator is not None
+        for total in (country_totals[country],)
     ]
     selected_period_end = next(
         (
